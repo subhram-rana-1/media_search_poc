@@ -64,7 +64,8 @@ export class MariaDbElasticModel implements IPocModel {
     }
   }
 
-  async search(tags: SearchTag[]): Promise<MediaResult[]> {
+  async search(rawTags: unknown[]): Promise<MediaResult[]> {
+    const tags = rawTags as SearchTag[];
     const client = getElasticsearchClient();
 
     if (tags.length === 0) {

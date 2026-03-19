@@ -40,7 +40,7 @@ export interface SeedMedia {
 }
 
 // ---------------------------------------------------------------------------
-// API search input
+// Generic API search input/output (used by Qdrant / Elastic POC models)
 // ---------------------------------------------------------------------------
 
 export interface SearchTag {
@@ -56,10 +56,6 @@ export interface SearchRequest {
   tags: SearchTag[];
 }
 
-// ---------------------------------------------------------------------------
-// API search output
-// ---------------------------------------------------------------------------
-
 export interface MediaResult {
   mediaUrl: string;
   score: number;
@@ -70,4 +66,40 @@ export interface SearchResponse {
   results: MediaResult[];
   pocModel: PocModelType;
   durationMs: number;
+}
+
+// ---------------------------------------------------------------------------
+// POC-1 (MariaDB-only) — model-specific API contract
+// ---------------------------------------------------------------------------
+
+export interface Poc1SearchTag {
+  name: string;
+  type: 'FIXED' | 'FREE_TEXT';
+  values: string;           // comma-separated (e.g. "morning,evening")
+  isMandatory?: boolean;    // only valid when type=FIXED; 400 if true on FREE_TEXT
+}
+
+export interface Poc1SearchRequest {
+  pocModel: PocModelType;
+  mediaTags: Poc1SearchTag[];
+  minQaScore?: number;   // 0–1, applied after final ranking to filter out low-quality results
+}
+
+export interface Poc1ResultTag {
+  name: string;
+  type: string;
+  value: string;
+  confidenceLevel: string;
+}
+
+export interface Poc1MediaResult {
+  id: number;
+  url: string;
+  visualQaScore: number;
+  tags: Poc1ResultTag[];
+  finalScore: number;
+}
+
+export interface Poc1SearchResponse {
+  medias: Poc1MediaResult[];
 }

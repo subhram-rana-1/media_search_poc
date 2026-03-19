@@ -79,7 +79,8 @@ export class MariaDbQdrantModel implements IPocModel {
     }
   }
 
-  async search(tags: SearchTag[]): Promise<MediaResult[]> {
+  async search(rawTags: unknown[]): Promise<MediaResult[]> {
+    const tags = rawTags as SearchTag[];
     if (tags.length === 0) {
       const rows = await queryMariaDb<MediaQdrantRow>(
         'SELECT id, media_url, visual_qa_score, qdrant_point_id, tag_names_json FROM media_qdrant ORDER BY visual_qa_score DESC LIMIT 100'
@@ -115,7 +116,6 @@ export class MariaDbQdrantModel implements IPocModel {
       const mediaUrl = payload.media_url as string;
       const tagNames = (payload.tag_names as string[]) ?? [];
 
-      // Determine which search tags actually matched
       const matchedTags = tags
         .filter((t) => tagNames.includes(t.name))
         .map((t) => t.name);
