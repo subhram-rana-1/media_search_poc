@@ -3,14 +3,50 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   PocModelType,
-  SearchTag,
-  TagType,
-  Weight,
   Poc1MediaResult,
   Poc1ResultTag,
-  MediaResult,
 } from '@/types';
 import { FIXED_TAG_DEFS, FREE_TEXT_TAG_DEFS } from './poc1-tag-definitions';
+
+// ---------------------------------------------------------------------------
+// Toast component
+// ---------------------------------------------------------------------------
+
+type ToastEntry = { id: number; type: 'success' | 'error'; message: string };
+
+function Toast({ toasts, onDismiss }: { toasts: ToastEntry[]; onDismiss: (id: number) => void }) {
+  return (
+    <div className="fixed top-4 right-4 z-[60] flex flex-col gap-2 w-80 pointer-events-none">
+      {toasts.map((t) => (
+        <div
+          key={t.id}
+          className={`pointer-events-auto flex items-start gap-3 px-4 py-3 rounded-xl shadow-lg border text-sm animate-slide-in ${
+            t.type === 'success'
+              ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+              : 'bg-red-50 border-red-200 text-red-700'
+          }`}
+        >
+          {t.type === 'success' ? (
+            <svg className="w-4 h-4 mt-0.5 shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+            </svg>
+          ) : (
+            <svg className="w-4 h-4 mt-0.5 shrink-0 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+          )}
+          <span className="flex-1 whitespace-pre-wrap break-words">{t.message}</span>
+          <button
+            className="shrink-0 text-slate-400 hover:text-slate-600 leading-none text-base"
+            onClick={() => onDismiss(t.id)}
+          >
+            ×
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // POC model list
@@ -353,116 +389,28 @@ function Poc1TagMatrix({
 }
 
 // ---------------------------------------------------------------------------
-// Generic Tag Editor (unchanged — used for Qdrant / Elastic)
-// ---------------------------------------------------------------------------
-
-const EMPTY_GENERIC_TAG: SearchTag = {
-  name: '',
-  type: TagType.FIXED,
-  value: '',
-  values: [],
-  weight: Weight.MEDIUM,
-};
-
-function GenericTagEditor({
-  tag,
-  index,
-  onChange,
-  onRemove,
-}: {
-  tag: SearchTag;
-  index: number;
-  onChange: (index: number, tag: SearchTag) => void;
-  onRemove: (index: number) => void;
-}) {
-  const [valuesInput, setValuesInput] = useState(tag.values.join(', '));
-
-  return (
-    <div className="border border-slate-200 rounded-xl p-4 bg-white shadow-sm space-y-3">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-semibold text-slate-400 uppercase tracking-wider">
-          Tag #{index + 1}
-        </span>
-        <button
-          type="button"
-          onClick={() => onRemove(index)}
-          className="text-red-400 hover:text-red-600 text-sm font-medium transition-colors"
-        >
-          Remove
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Name *</label>
-          <input
-            type="text"
-            placeholder="e.g. category"
-            value={tag.name}
-            onChange={(e) => onChange(index, { ...tag, name: e.target.value })}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Type</label>
-          <select
-            value={tag.type}
-            onChange={(e) => onChange(index, { ...tag, type: e.target.value as TagType })}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          >
-            <option value={TagType.FIXED}>FIXED</option>
-            <option value={TagType.FREE_TEXT}>FREE_TEXT</option>
-          </select>
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Value</label>
-          <input
-            type="text"
-            placeholder="e.g. nature"
-            value={tag.value}
-            onChange={(e) => onChange(index, { ...tag, value: e.target.value })}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Weight</label>
-          <select
-            value={tag.weight}
-            onChange={(e) => onChange(index, { ...tag, weight: e.target.value as Weight })}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          >
-            <option value={Weight.HIGH}>HIGH</option>
-            <option value={Weight.MEDIUM}>MEDIUM</option>
-            <option value={Weight.LOW}>LOW</option>
-          </select>
-        </div>
-        <div className="sm:col-span-2">
-          <label className="block text-xs font-medium text-slate-500 mb-1">Values (comma-separated)</label>
-          <input
-            type="text"
-            placeholder="e.g. nature, landscape"
-            value={valuesInput}
-            onChange={(e) => {
-              setValuesInput(e.target.value);
-              const arr = e.target.value.split(',').map((v) => v.trim()).filter(Boolean);
-              onChange(index, { ...tag, values: arr });
-            }}
-            className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          />
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Result cards
 // ---------------------------------------------------------------------------
 
-function Poc1MediaCard({ result }: { result: Poc1MediaResult }) {
+function Poc1MediaCard({
+  result,
+  onImageClick,
+}: {
+  result: Poc1MediaResult;
+  onImageClick: (url: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const fixedTags = result.tags.filter((t) => t.type === 'FIXED');
+  const freeTags = result.tags.filter((t) => t.type === 'FREE_TEXT');
+
   return (
     <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-      <div className="relative aspect-video bg-slate-100">
+      {/* Image — click to enlarge */}
+      <div
+        className="relative w-full bg-slate-100 cursor-zoom-in"
+        style={{ aspectRatio: '16/9' }}
+        onClick={() => onImageClick(result.url)}
+      >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={result.url}
@@ -479,71 +427,104 @@ function Poc1MediaCard({ result }: { result: Poc1MediaResult }) {
         <div className="absolute top-2 left-2 bg-slate-800/70 text-white text-xs px-2 py-1 rounded-full">
           ID: {result.id}
         </div>
-      </div>
-      <div className="p-3 space-y-2">
-        <div className="flex items-center justify-between text-xs text-slate-500">
-          <span className="truncate flex-1" title={result.url}>{result.url}</span>
-          <span className="ml-2 shrink-0 font-medium text-slate-700">
-            VQA: {result.visualQaScore}
-          </span>
+        <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-colors flex items-center justify-center">
+          <svg className="w-8 h-8 text-white opacity-0 group-hover:opacity-100 drop-shadow" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
+          </svg>
         </div>
-        {result.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {result.tags.map((t: Poc1ResultTag, i: number) => (
-              <span
-                key={`${t.name}-${t.value}-${i}`}
-                className={`text-xs px-2 py-0.5 rounded-full border ${
-                  t.type === 'FIXED'
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-100'
-                    : 'bg-violet-50 text-violet-700 border-violet-100'
-                }`}
-                title={`${t.type} | confidence: ${t.confidenceLevel}`}
-              >
-                {t.name}: {t.value.length > 30 ? t.value.slice(0, 30) + '...' : t.value}
-              </span>
-            ))}
-          </div>
-        )}
       </div>
-    </div>
-  );
-}
 
-function GenericMediaCard({ result }: { result: MediaResult }) {
-  return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-      <div className="relative aspect-video bg-slate-100">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={result.mediaUrl}
-          alt="media result"
-          className="w-full h-full object-cover"
-          onError={(e) => {
-            (e.currentTarget as HTMLImageElement).src =
-              'https://placehold.co/800x450/e2e8f0/94a3b8?text=Image+Not+Available';
-          }}
-        />
-        <div className="absolute top-2 right-2 bg-indigo-600 text-white text-xs font-bold px-2 py-1 rounded-full shadow">
-          {result.score.toFixed(3)}
-        </div>
-      </div>
-      <div className="p-3">
-        <p className="text-xs text-slate-400 truncate mb-2" title={result.mediaUrl}>
-          {result.mediaUrl}
-        </p>
-        {result.matchedTags.length > 0 && (
-          <div className="flex flex-wrap gap-1">
-            {result.matchedTags.map((t) => (
-              <span
-                key={t}
-                className="bg-indigo-50 text-indigo-700 text-xs px-2 py-0.5 rounded-full border border-indigo-100"
-              >
-                {t}
-              </span>
-            ))}
+      {/* Summary row */}
+      <div className="px-4 py-3 flex items-center justify-between gap-3 border-b border-slate-100">
+        <div className="min-w-0">
+          <p className="text-xs text-slate-500 truncate" title={result.url}>{result.url}</p>
+          <div className="flex items-center gap-3 mt-1">
+            <span className="text-xs text-slate-600">
+              VQA: <span className="font-semibold text-slate-800">{result.visualQaScore}</span>
+            </span>
+            <span className="text-xs text-slate-600">
+              Tags: <span className="font-semibold text-slate-800">{result.tags.length}</span>
+            </span>
           </div>
-        )}
+        </div>
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="shrink-0 text-xs font-medium px-3 py-1.5 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors"
+        >
+          {expanded ? 'Hide Details' : 'View Details'}
+        </button>
       </div>
+
+      {/* Expanded details */}
+      {expanded && (
+        <div className="px-4 py-3 space-y-3 bg-slate-50/60">
+          {/* Media metadata */}
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div className="bg-white rounded-lg p-2 border border-slate-100">
+              <span className="text-slate-400 block mb-0.5">Media ID</span>
+              <span className="font-semibold text-slate-800">{result.id}</span>
+            </div>
+            <div className="bg-white rounded-lg p-2 border border-slate-100">
+              <span className="text-slate-400 block mb-0.5">Visual QA Score</span>
+              <span className="font-semibold text-slate-800">{result.visualQaScore}</span>
+            </div>
+            <div className="bg-white rounded-lg p-2 border border-slate-100">
+              <span className="text-slate-400 block mb-0.5">Final Score</span>
+              <span className="font-semibold text-indigo-700">{result.finalScore}</span>
+            </div>
+            <div className="bg-white rounded-lg p-2 border border-slate-100">
+              <span className="text-slate-400 block mb-0.5">Total Tags</span>
+              <span className="font-semibold text-slate-800">{result.tags.length}</span>
+            </div>
+          </div>
+
+          <div className="text-xs">
+            <span className="text-slate-400 block mb-1">URL</span>
+            <span className="text-slate-700 break-all">{result.url}</span>
+          </div>
+
+          {/* Fixed tags */}
+          {fixedTags.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                Fixed Tags ({fixedTags.length})
+              </p>
+              <div className="space-y-1">
+                {fixedTags.map((t, i) => (
+                  <div key={`${t.name}-${i}`} className="flex items-center justify-between bg-white rounded-lg px-3 py-1.5 border border-emerald-100 text-xs">
+                    <span className="font-medium text-slate-700">{t.name}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="text-emerald-700 font-semibold">{t.value}</span>
+                      <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{t.confidenceLevel}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Free text tags */}
+          {freeTags.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">
+                Free Text Tags ({freeTags.length})
+              </p>
+              <div className="space-y-1">
+                {freeTags.map((t, i) => (
+                  <div key={`${t.name}-${i}`} className="bg-white rounded-lg px-3 py-2 border border-violet-100 text-xs">
+                    <div className="flex items-center justify-between mb-0.5">
+                      <span className="font-medium text-slate-700">{t.name}</span>
+                      <span className="text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded text-[10px]">{t.confidenceLevel}</span>
+                    </div>
+                    <p className="text-violet-700 break-all">{t.value}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -574,23 +555,28 @@ function initFreeTags(): FreeTextTagState[] {
 export default function Home() {
   const [selectedModel, setSelectedModel] = useState<PocModelType>(PocModelType.MARIADB_ONLY);
 
-  // POC-1 state
+  // Shared tag inputs — same for all models
   const [fixedTags, setFixedTags] = useState<FixedTagState[]>(initFixedTags);
   const [freeTags, setFreeTags] = useState<FreeTextTagState[]>(initFreeTags);
   const [minQaScore, setMinQaScore] = useState<number>(0);
+
+  // Results — unified: poc1Results used for all models
   const [poc1Results, setPoc1Results] = useState<Poc1MediaResult[] | null>(null);
 
-  // Generic model state
-  const [genericTags, setGenericTags] = useState<SearchTag[]>([{ ...EMPTY_GENERIC_TAG }]);
-  const [genericResults, setGenericResults] = useState<MediaResult[] | null>(null);
-
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [durationMs, setDurationMs] = useState<number | null>(null);
   const [seeding, setSeeding] = useState(false);
-  const [seedResult, setSeedResult] = useState<string | null>(null);
+  const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const toastCounter = useRef(0);
 
-  const isPoc1 = selectedModel === PocModelType.MARIADB_ONLY;
+  function pushToast(type: 'success' | 'error', message: string) {
+    const id = ++toastCounter.current;
+    setToasts((prev) => [...prev, { id, type, message }]);
+    setTimeout(() => setToasts((prev) => prev.filter((t) => t.id !== id)), 5000);
+  }
+  function dismissToast(id: number) {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  }
 
   // ── handlers ──
   function updateFixedTag(index: number, patch: Partial<FixedTagState>) {
@@ -600,77 +586,51 @@ export default function Home() {
     setFreeTags((prev) => prev.map((t, i) => (i === index ? { ...t, values } : t)));
   }
 
-  function addGenericTag() {
-    setGenericTags((prev) => [...prev, { ...EMPTY_GENERIC_TAG }]);
-  }
-  function removeGenericTag(index: number) {
-    setGenericTags((prev) => prev.filter((_, i) => i !== index));
-  }
-  function updateGenericTag(index: number, tag: SearchTag) {
-    setGenericTags((prev) => prev.map((t, i) => (i === index ? tag : t)));
-  }
-
   // ── search ──
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
-    setError(null);
     setPoc1Results(null);
-    setGenericResults(null);
     setDurationMs(null);
     setLoading(true);
 
     try {
-      let bodyObj: Record<string, unknown>;
+      const mediaTags = [
+        ...fixedTags
+          .filter((t) => t.selectedValues.length > 0)
+          .map((t) => ({
+            name: t.name,
+            type: 'FIXED' as const,
+            values: t.selectedValues.join(','),
+            isMandatory: t.isMandatory,
+          })),
+        ...freeTags
+          .filter((t) => t.values.length > 0)
+          .map((t) => ({
+            name: t.name,
+            type: 'FREE_TEXT' as const,
+            values: t.values.join(','),
+            isMandatory: false,
+          })),
+      ];
 
-      if (isPoc1) {
-        // Build mediaTags only from rows that have values set
-        const mediaTags = [
-          ...fixedTags
-            .filter((t) => t.selectedValues.length > 0)
-            .map((t) => ({
-              name: t.name,
-              type: 'FIXED' as const,
-              values: t.selectedValues.join(','),
-              isMandatory: t.isMandatory,
-            })),
-          ...freeTags
-            .filter((t) => t.values.length > 0)
-            .map((t) => ({
-              name: t.name,
-              type: 'FREE_TEXT' as const,
-              values: t.values.join(','),
-              isMandatory: false,
-            })),
-        ];
-
-        if (mediaTags.length === 0) {
-          setError('Please select at least one tag value before searching.');
-          setLoading(false);
-          return;
-        }
-
-        bodyObj = { pocModel: selectedModel, mediaTags, minQaScore };
-      } else {
-        const validTags = genericTags.filter((t) => t.name.trim() !== '');
-        bodyObj = { pocModel: selectedModel, tags: validTags };
+      if (mediaTags.length === 0) {
+        pushToast('error', 'Please select at least one tag value before searching.');
+        setLoading(false);
+        return;
       }
 
       const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(bodyObj),
+        body: JSON.stringify({ pocModel: selectedModel, mediaTags, minQaScore }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? 'Search failed');
 
       setDurationMs(data.durationMs ?? null);
-      if (isPoc1) {
-        setPoc1Results(data.medias ?? []);
-      } else {
-        setGenericResults(data.results ?? []);
-      }
+      setPoc1Results(data.medias ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Unknown error');
+      pushToast('error', err instanceof Error ? err.message : 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -679,8 +639,6 @@ export default function Home() {
   // ── seed ──
   async function handleSeed() {
     setSeeding(true);
-    setSeedResult(null);
-    setError(null);
     try {
       const res = await fetch('/api/seed', {
         method: 'POST',
@@ -692,39 +650,67 @@ export default function Home() {
         (r: { model: string; success: boolean; error?: string; durationMs: number }) =>
           `${r.model}: ${r.success ? `OK (${r.durationMs}ms)` : `FAILED — ${r.error}`}`
       );
-      setSeedResult(lines.join('\n'));
+      pushToast('success', lines.join('\n'));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Seed failed');
+      pushToast('error', err instanceof Error ? err.message : 'Seed failed');
     } finally {
       setSeeding(false);
     }
   }
 
-  const resultCount = isPoc1 ? poc1Results?.length ?? 0 : genericResults?.length ?? 0;
-  const hasResults = isPoc1 ? poc1Results !== null : genericResults !== null;
+  const resultCount = poc1Results?.length ?? 0;
+  const hasResults = poc1Results !== null;
+
+  // Lightbox
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50">
-      {/* Header */}
-      <header className="bg-white border-b border-slate-200 shadow-sm">
-        <div className="max-w-6xl mx-auto px-6 py-5 flex items-center gap-4">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center">
-            <svg className="w-5 h-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
-                d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-            </svg>
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-slate-800">Media Search POC</h1>
-            <p className="text-sm text-slate-500">
-              Compare search backends: MariaDB · Qdrant · Elasticsearch
-            </p>
-          </div>
+    <div className="h-screen bg-gradient-to-br from-slate-50 to-indigo-50 flex flex-col overflow-hidden">
+      {/* Sticky navbar */}
+      <header className="bg-white border-b border-slate-200 shadow-sm shrink-0">
+        <div className="max-w-screen-2xl mx-auto px-6 py-3">
+          <h1 className="text-lg font-bold text-slate-800">Media Search POC</h1>
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-6 py-8 space-y-8">
-        <form onSubmit={handleSearch} className="space-y-6">
+      {/* Toast notifications */}
+      <Toast toasts={toasts} onDismiss={dismissToast} />
+
+      {/* Lightbox overlay */}
+      {lightboxUrl && (
+        <div
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-6"
+          onClick={() => setLightboxUrl(null)}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={lightboxUrl}
+            alt="enlarged media"
+            className="max-w-full max-h-full rounded-xl shadow-2xl object-contain"
+            onClick={(e) => e.stopPropagation()}
+            onError={(e) => {
+              (e.currentTarget as HTMLImageElement).src =
+                'https://placehold.co/1200x675/e2e8f0/94a3b8?text=Image+Not+Available';
+            }}
+          />
+          <button
+            className="absolute top-4 right-4 text-white bg-black/50 hover:bg-black/80 rounded-full w-9 h-9 flex items-center justify-center text-xl leading-none transition-colors"
+            onClick={() => setLightboxUrl(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {/* Two-column layout — fills remaining viewport height */}
+      <div className="flex-1 flex overflow-hidden max-w-screen-2xl mx-auto w-full gap-0" style={{ minHeight: 0 }}>
+
+        {/* ── Left panel: 60% width, independently scrollable, sticky action bar ── */}
+        <div className="w-[60%] shrink-0 flex flex-col border-r border-slate-200" style={{ minHeight: 0 }}>
+
+          {/* Scrollable form content */}
+          <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
+        <form id="search-form" onSubmit={handleSearch} className="space-y-4">
 
           {/* ── 1. Model selector ── */}
           <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
@@ -762,150 +748,126 @@ export default function Home() {
               <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">
                 2. Define Search Tags
               </h2>
-              {!isPoc1 && (
-                <button
-                  type="button"
-                  onClick={addGenericTag}
-                  className="text-sm font-medium text-indigo-600 hover:text-indigo-800 border border-indigo-300 hover:border-indigo-500 px-3 py-1.5 rounded-lg transition-colors"
-                >
-                  + Add Tag
-                </button>
-              )}
-              {isPoc1 && (
-                <span className="text-xs text-slate-400">
-                  Select at least one tag · Mandatory applies to FIXED tags only
-                </span>
-              )}
+              <span className="text-xs text-slate-400">
+                Select at least one tag · Mandatory applies to FIXED tags only
+              </span>
             </div>
-
-            {isPoc1 ? (
-              <Poc1TagMatrix
-                fixedTags={fixedTags}
-                freeTags={freeTags}
-                onFixedChange={updateFixedTag}
-                onFreeChange={updateFreeTag}
-              />
-            ) : (
-              <div className="p-6 space-y-3">
-                {genericTags.map((tag, i) => (
-                  <GenericTagEditor
-                    key={i}
-                    tag={tag}
-                    index={i}
-                    onChange={updateGenericTag}
-                    onRemove={removeGenericTag}
-                  />
-                ))}
-                {genericTags.length === 0 && (
-                  <p className="text-sm text-slate-400 text-center py-6">
-                    No tags added. Click &quot;Add Tag&quot; to begin.
-                  </p>
-                )}
-              </div>
-            )}
+            <Poc1TagMatrix
+              fixedTags={fixedTags}
+              freeTags={freeTags}
+              onFixedChange={updateFixedTag}
+              onFreeChange={updateFreeTag}
+            />
           </section>
 
-          {/* ── 3. Min QA Score (POC-1 only) ── */}
-          {isPoc1 && (
-            <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-              <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4">
-                3. Quality Filter
-              </h2>
-              <div className="flex items-center gap-4">
-                <label className="text-sm font-medium text-slate-600 whitespace-nowrap">
-                  Min QA Score
-                </label>
-                <input
-                  type="number"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={minQaScore}
-                  onChange={(e) => {
-                    const v = parseFloat(e.target.value);
-                    setMinQaScore(isNaN(v) ? 0 : Math.min(1, Math.max(0, v)));
-                  }}
-                  className="w-28 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                />
-                <span className="text-xs text-slate-400">
-                  Range 0 – 1 · Results with visual QA score below this threshold will be excluded
-                </span>
-              </div>
-            </section>
-          )}
+          {/* ── 3. Min QA Score ── */}
+          <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4">
+              3. Quality Filter
+            </h2>
+            <div className="flex items-center gap-4">
+              <label className="text-sm font-medium text-slate-600 whitespace-nowrap">
+                Min QA Score
+              </label>
+              <input
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                value={minQaScore}
+                onChange={(e) => {
+                  const v = parseFloat(e.target.value);
+                  setMinQaScore(isNaN(v) ? 0 : Math.min(1, Math.max(0, v)));
+                }}
+                className="w-28 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              />
+              <span className="text-xs text-slate-400">
+                Range 0 – 1 · Results below this threshold will be excluded
+              </span>
+            </div>
+          </section>
 
-          {/* ── Actions ── */}
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex-1 sm:flex-none bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-8 py-3 rounded-xl transition-colors shadow-sm"
-            >
-              {loading ? 'Searching...' : 'Search'}
-            </button>
+        </form>
+
+          </div>{/* end scrollable form area */}
+
+          {/* ── Sticky action bar ── */}
+          <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4 flex gap-3">
             <button
               type="button"
               onClick={handleSeed}
               disabled={seeding}
-              className="flex-1 sm:flex-none bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 font-semibold px-8 py-3 rounded-xl border border-slate-300 transition-colors shadow-sm"
+              className="flex-1 bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 font-semibold px-6 py-3 rounded-xl border border-slate-300 transition-colors shadow-sm"
             >
-              {seeding ? 'Seeding...' : `Seed "${selectedModel}"`}
+              {seeding ? 'Seeding...' : 'Run Migration'}
+            </button>
+            <button
+              type="submit"
+              form="search-form"
+              disabled={loading}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-6 py-3 rounded-xl transition-colors shadow-sm"
+            >
+              {loading ? 'Searching...' : 'Search'}
             </button>
           </div>
-        </form>
 
-        {/* Seed result */}
-        {seedResult && (
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-4 text-sm text-emerald-800 whitespace-pre font-mono">
-            {seedResult}
-          </div>
-        )}
+        </div>{/* end left panel */}
 
-        {/* Error */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-xl px-5 py-4 text-sm text-red-700">
-            {error}
-          </div>
-        )}
+        {/* ── Right panel: 40% width, independently scrollable ── */}
+        <div className="w-[40%] shrink-0 flex flex-col" style={{ minHeight: 0 }}>
 
-        {/* ── Results ── */}
-        {hasResults && (
-          <section>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-bold text-slate-800">
-                Results
+          {/* Results header — sticky within right panel */}
+          <div className="shrink-0 px-6 pt-6 pb-3 border-b border-slate-100 bg-slate-50/80">
+            <h2 className="text-base font-bold text-slate-800">
+              Results
+              {hasResults && (
                 <span className="ml-2 text-sm font-normal text-slate-500">
                   {resultCount} item{resultCount !== 1 ? 's' : ''}
                   {durationMs !== null ? ` · ${durationMs}ms` : ''}
                   {' · '}{selectedModel}
                 </span>
-              </h2>
-            </div>
+              )}
+            </h2>
+          </div>
 
-            {resultCount === 0 ? (
-              <div className="text-center py-16 text-slate-400">
-                <svg className="w-12 h-12 mx-auto mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          {/* Scrollable results list */}
+          <div className="flex-1 overflow-y-auto px-6 py-4">
+            {!hasResults && (
+              <div className="flex flex-col items-center justify-center h-64 text-slate-300">
+                <svg className="w-16 h-16 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
+                    d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                </svg>
+                <p className="text-sm">Search results will appear here</p>
+              </div>
+            )}
+
+            {hasResults && resultCount === 0 && (
+              <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                <svg className="w-12 h-12 mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                     d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                 </svg>
                 <p className="text-sm">No media matched your search tags.</p>
               </div>
-            ) : isPoc1 && poc1Results ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {poc1Results.map((result) => (
-                  <Poc1MediaCard key={result.id} result={result} />
+            )}
+
+            {hasResults && resultCount > 0 && (
+              <div className="space-y-4">
+                {poc1Results!.map((result) => (
+                  <Poc1MediaCard
+                    key={result.id}
+                    result={result}
+                    onImageClick={(url) => setLightboxUrl(url)}
+                  />
                 ))}
               </div>
-            ) : genericResults ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                {genericResults.map((result, i) => (
-                  <GenericMediaCard key={i} result={result} />
-                ))}
-              </div>
-            ) : null}
-          </section>
-        )}
-      </main>
+            )}
+          </div>
+
+        </div>{/* end right panel */}
+
+      </div>{/* end two-column layout */}
     </div>
   );
 }
