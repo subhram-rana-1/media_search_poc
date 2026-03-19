@@ -27,3 +27,20 @@ export async function queryMariaDb<T = unknown>(
   const [rows] = await conn.execute(sql, params);
   return rows as T[];
 }
+
+/**
+ * Acquire a single connection from the pool, run the callback, then release.
+ * Use this for DDL sequences (DROP TABLE, CREATE TABLE, SET FOREIGN_KEY_CHECKS,
+ * etc.) so that all statements execute on the same connection and
+ * session-level settings like FOREIGN_KEY_CHECKS actually take effect.
+ */
+export async function withConnection(
+  fn: (conn: mysql.PoolConnection) => Promise<void>
+): Promise<void> {
+  const conn = await getMariaDbPool().getConnection();
+  try {
+    await fn(conn);
+  } finally {
+    conn.release();
+  }
+}

@@ -175,4 +175,9 @@ export class MariaDbQdrantModel implements IPocModel {
       });
     }
   }
+
+  async migrate(data: SeedMedia[]): Promise<void> {
+    // TODO: implement full DDL migration for Qdrant model
+    await this.seed(data);
+  }
 }

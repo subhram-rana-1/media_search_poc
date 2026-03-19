@@ -220,4 +220,9 @@ export class MariaDbElasticModel implements IPocModel {
 
     await client.indices.refresh({ index: ES_INDEX });
   }
+
+  async migrate(data: SeedMedia[]): Promise<void> {
+    // TODO: implement full DDL migration for Elasticsearch model
+    await this.seed(data);
+  }
 }

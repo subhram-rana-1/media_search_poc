@@ -13,4 +13,9 @@ export interface IPocModel {
   search(tags: unknown[]): Promise<unknown>;
 
   seed(data: SeedMedia[]): Promise<void>;
+
+  /**
+   * Full migration: drop all tables → recreate schema → seed with fresh data.
+   */
+  migrate(data: SeedMedia[]): Promise<void>;
 }

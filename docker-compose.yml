@@ -1,0 +1,38 @@
+services:
+  mariadb:
+    image: mariadb:11.7
+    container_name: media_search_mariadb
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: media_search
+    ports:
+      - "3307:3306"   # host 3307 → container 3306
+    volumes:
+      - mariadb_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  app:
+    build: .
+    container_name: media_search_app
+    restart: unless-stopped
+    ports:
+      - "3002:3002"   # host 3002 → container 3002
+    env_file:
+      - .env.local    # reads all vars from .env.local automatically
+    environment:
+      PORT: 3002
+      # Override DB host so the app reaches the sibling container, not localhost
+      MARIADB_HOST: mariadb
+      MARIADB_PORT: 3306
+    depends_on:
+      mariadb:
+        condition: service_healthy
+
+volumes:
+  mariadb_data:

@@ -97,7 +97,7 @@ export interface Poc1MediaResult {
   url: string;
   visualQaScore: number;
   tags: Poc1ResultTag[];
-  finalScore: number;
+  finalRank: number;
 }
 
 export interface Poc1SearchResponse {

@@ -58,16 +58,7 @@ const POC_MODELS: { value: PocModelType; label: string; description: string }[] 
     label: 'MariaDB Only (POC-1)',
     description: '3-step ranking: fixed tag filter + vector similarity + weighted merge',
   },
-  {
-    value: PocModelType.MARIADB_QDRANT,
-    label: 'MariaDB + Qdrant',
-    description: 'Vector similarity search via Qdrant',
-  },
-  {
-    value: PocModelType.MARIADB_ELASTIC,
-    label: 'MariaDB + Elasticsearch',
-    description: 'Full-text nested tag search via Elasticsearch',
-  },
+  // MariaDB + Qdrant and MariaDB + Elasticsearch are disabled until those services are configured.
 ];
 
 // ---------------------------------------------------------------------------
@@ -422,7 +413,7 @@ function Poc1MediaCard({
           }}
         />
         <div className="absolute top-2 right-2 bg-indigo-600 text-white text-xs font-bold px-2.5 py-1 rounded-full shadow">
-          Score: {result.finalScore}
+          Rank: {result.finalRank}
         </div>
         <div className="absolute top-2 left-2 bg-slate-800/70 text-white text-xs px-2 py-1 rounded-full">
           ID: {result.id}
@@ -470,8 +461,8 @@ function Poc1MediaCard({
               <span className="font-semibold text-slate-800">{result.visualQaScore}</span>
             </div>
             <div className="bg-white rounded-lg p-2 border border-slate-100">
-              <span className="text-slate-400 block mb-0.5">Final Score</span>
-              <span className="font-semibold text-indigo-700">{result.finalScore}</span>
+              <span className="text-slate-400 block mb-0.5">Final Rank</span>
+              <span className="font-semibold text-indigo-700">{result.finalRank}</span>
             </div>
             <div className="bg-white rounded-lg p-2 border border-slate-100">
               <span className="text-slate-400 block mb-0.5">Total Tags</span>
@@ -636,11 +627,11 @@ export default function Home() {
     }
   }
 
-  // ── seed ──
+  // ── migrate (drop → recreate schema → seed) ──
   async function handleSeed() {
     setSeeding(true);
     try {
-      const res = await fetch('/api/seed', {
+      const res = await fetch('/api/migrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ model: selectedModel }),
@@ -652,7 +643,7 @@ export default function Home() {
       );
       pushToast('success', lines.join('\n'));
     } catch (err) {
-      pushToast('error', err instanceof Error ? err.message : 'Seed failed');
+      pushToast('error', err instanceof Error ? err.message : 'Migration failed');
     } finally {
       setSeeding(false);
     }

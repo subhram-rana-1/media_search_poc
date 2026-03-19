@@ -1,4 +1,4 @@
-import { queryMariaDb } from '@/database/clients/mariadb';
+import { queryMariaDb, withConnection } from '@/database/clients/mariadb';
 import { getEmbedding } from '@/database/clients/openai';
 import {
   Poc1MediaResult,
@@ -105,20 +105,20 @@ export class MariaDbOnlyModel implements IPocModel {
     const totalCount = step1MediaIds.length;
 
     // --- Step 3: weighted ranking ------------------------------------------
-    const ranked: { mediaId: number; finalScore: number }[] = [];
+    const ranked: { mediaId: number; finalRank: number }[] = [];
 
     for (const mediaId of step1MediaIds) {
       const rank1 = sortOrder1.get(mediaId) ?? totalCount;
       const rank2 = sortOrder2.get(mediaId) ?? totalCount;
-      const finalScore = RANK_WEIGHT * rank1 + RANK_WEIGHT * rank2;
-      ranked.push({ mediaId, finalScore });
+      const finalRank = RANK_WEIGHT * rank1 + RANK_WEIGHT * rank2;
+      ranked.push({ mediaId, finalRank });
     }
 
     // Fetch media details for sorting tiebreaker
     const mediaMap = await this.fetchMediaDetails(step1MediaIds);
 
     ranked.sort((a, b) => {
-      if (a.finalScore !== b.finalScore) return a.finalScore - b.finalScore;
+      if (a.finalRank !== b.finalRank) return a.finalRank - b.finalRank;
       const vqaA = mediaMap.get(a.mediaId)?.visual_qa_score ?? 0;
       const vqaB = mediaMap.get(b.mediaId)?.visual_qa_score ?? 0;
       return vqaB - vqaA; // higher visual_qa_score wins tiebreak
@@ -139,7 +139,7 @@ export class MariaDbOnlyModel implements IPocModel {
           url: media?.url ?? '',
           visualQaScore: Number(media?.visual_qa_score ?? 0),
           tags: tagsByMedia.get(r.mediaId) ?? [],
-          finalScore: Math.round(r.finalScore * 1000) / 1000,
+          finalRank: Math.round(r.finalRank * 1000) / 1000,
         };
       });
   }
@@ -410,5 +410,64 @@ export class MariaDbOnlyModel implements IPocModel {
         }
       }
     }
+  }
+
+  // ========================================================================
+  // MIGRATE  (drop → create → seed)
+  // ========================================================================
+
+  async migrate(data: SeedMedia[]): Promise<void> {
+    // Run all DDL on a single connection so session settings (FK checks) and
+    // table visibility are consistent across every statement.
+    await withConnection(async (conn) => {
+      await conn.query('SET FOREIGN_KEY_CHECKS = 0');
+
+      await conn.query('DROP TABLE IF EXISTS one_media_free_text_tag');
+      await conn.query('DROP TABLE IF EXISTS one_media_fixed_tag');
+      await conn.query('DROP TABLE IF EXISTS media');
+
+      await conn.query('SET FOREIGN_KEY_CHECKS = 1');
+
+      await conn.query(`
+        CREATE TABLE media (
+          id              INT(11)        NOT NULL AUTO_INCREMENT,
+          url             VARCHAR(512)   NOT NULL,
+          visual_qa_score DECIMAL(5,2)   NOT NULL DEFAULT 0,
+          PRIMARY KEY (id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+
+      await conn.query(`
+        CREATE TABLE one_media_fixed_tag (
+          id               INT(11)       NOT NULL AUTO_INCREMENT,
+          media_id         INT(11)       NOT NULL,
+          name             VARCHAR(256)  NOT NULL,
+          value            VARCHAR(256)  NOT NULL,
+          confidence_level TINYINT(1)    NOT NULL,
+          PRIMARY KEY (id),
+          INDEX idx_name_value_media (name, value, media_id),
+          INDEX idx_media_id (media_id),
+          FOREIGN KEY (media_id) REFERENCES media(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+
+      await conn.query(`
+        CREATE TABLE one_media_free_text_tag (
+          id               INT(11)       NOT NULL AUTO_INCREMENT,
+          media_id         INT(11)       NOT NULL,
+          name             VARCHAR(256)  NOT NULL,
+          value            TEXT          NOT NULL,
+          confidence_level TINYINT(1)    NOT NULL,
+          embedding        VECTOR(1536)  NOT NULL,
+          PRIMARY KEY (id),
+          VECTOR INDEX idx_embedding (embedding),
+          INDEX idx_media_id (media_id),
+          FOREIGN KEY (media_id) REFERENCES media(id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+      `);
+    });
+
+    // Seed runs after the connection is released; tables are globally visible.
+    await this.seed(data);
   }
 }

@@ -4,8 +4,6 @@ import {
   Poc1SearchTag,
   Poc1MediaResult,
   Poc1SearchResponse,
-  SearchResponse,
-  MediaResult,
 } from '@/types';
 import { getModel } from '@/poc-models/registry';
 import { MariaDbOnlyModel } from '@/poc-models/mariadb-only.model';
@@ -36,13 +34,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    // ── MariaDB-only (POC-1) uses its own contract ──────────────────────
-    if (pocModel === PocModelType.MARIADB_ONLY) {
-      return await handlePoc1(body, pocModel, start);
-    }
-
-    // ── Generic contract for other models ───────────────────────────────
-    return await handleGeneric(body, pocModel, start);
+    return await handlePoc1(body, pocModel, start);
   } catch (err) {
     console.error('[/api/search] Error:', err);
     return NextResponse.json(
@@ -112,33 +104,3 @@ async function handlePoc1(
   return NextResponse.json(response);
 }
 
-// ---------------------------------------------------------------------------
-// Generic handler (Qdrant, Elastic, etc.)
-// ---------------------------------------------------------------------------
-
-async function handleGeneric(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  body: any,
-  pocModel: PocModelType,
-  start: number
-) {
-  const { tags } = body;
-
-  if (!Array.isArray(tags)) {
-    return NextResponse.json(
-      { error: 'tags must be an array' },
-      { status: 400 }
-    );
-  }
-
-  const model = getModel(pocModel);
-  const results = (await model.search(tags)) as MediaResult[];
-
-  const response: SearchResponse = {
-    results,
-    pocModel,
-    durationMs: Date.now() - start,
-  };
-
-  return NextResponse.json(response);
-}
