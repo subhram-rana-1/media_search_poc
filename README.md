@@ -1,36 +1,190 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Media Search POC
 
-## Getting Started
+A Next.js fullstack POC for comparing different media search backends.
 
-First, run the development server:
+## Architecture
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+The app uses the **Strategy Pattern** — each search approach implements a common `IPocModel` interface and is registered in a central registry. The API layer selects the implementation at request time based on the `pocModel` parameter.
+
+```
+POST /api/search  { pocModel, tags[] }  →  MediaResult[]
+POST /api/seed    { model? }            →  seed results
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+### Supported POC Models
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Model | `pocModel` value | Description |
+|---|---|---|
+| MariaDB Only | `mariadb-only` | SQL tag matching with weighted scoring |
+| MariaDB + Qdrant | `mariadb-qdrant` | Vector similarity search |
+| MariaDB + Elasticsearch | `mariadb-elastic` | Full-text nested tag search |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+## Project Structure
 
-To learn more about Next.js, take a look at the following resources:
+```
+src/
+├── app/
+│   ├── api/
+│   │   ├── search/route.ts       # POST /api/search
+│   │   └── seed/route.ts         # POST /api/seed
+│   ├── page.tsx                  # Frontend UI
+│   ├── layout.tsx
+│   └── globals.css
+├── database/
+│   ├── clients/
+│   │   ├── mariadb.ts            # MariaDB connection pool
+│   │   ├── qdrant.ts             # Qdrant client
+│   │   └── elasticsearch.ts      # Elasticsearch client
+│   ├── schemas/
+│   │   ├── mariadb-only/schema.sql
+│   │   ├── mariadb-qdrant/schema.sql
+│   │   └── mariadb-elastic/schema.sql
+│   └── seed/
+│       ├── seed-data.json        # Sample media data
+│       └── seeder.ts             # Seeding logic
+├── poc-models/
+│   ├── base.ts                   # IPocModel interface
+│   ├── mariadb-only.model.ts
+│   ├── mariadb-qdrant.model.ts
+│   ├── mariadb-elastic.model.ts
+│   └── registry.ts               # Model registry
+└── types/
+    └── index.ts                  # Shared TypeScript types/enums
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+---
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Setup
 
-## Deploy on Vercel
+### 1. Copy and configure environment
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+cp .env.example .env.local
+# Edit .env.local with your DB connection details
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### 2. Set up MariaDB
+
+Start MariaDB and create the database + tables for the models you want to test:
+
+```bash
+# mariadb-only
+mysql -u root -p < src/database/schemas/mariadb-only/schema.sql
+
+# mariadb-qdrant
+mysql -u root -p < src/database/schemas/mariadb-qdrant/schema.sql
+
+# mariadb-elastic
+mysql -u root -p < src/database/schemas/mariadb-elastic/schema.sql
+```
+
+### 3. Start optional backends
+
+**Qdrant** (Docker):
+```bash
+docker run -p 6333:6333 qdrant/qdrant
+```
+
+**Elasticsearch** (Docker):
+```bash
+docker run -p 9200:9200 -e "discovery.type=single-node" -e "xpack.security.enabled=false" elasticsearch:8.13.0
+```
+
+### 4. Install dependencies and run
+
+```bash
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000).
+
+---
+
+## Using the App
+
+1. **Select a POC Model** — pick which backend to use
+2. **Seed data** — click the "Seed" button to populate that model's database with sample data
+3. **Add search tags** — fill in tag name, type, value/values, and weight
+4. **Search** — click Search to run the query and see results with scores
+
+---
+
+## API Reference
+
+### POST /api/search
+
+**Request body:**
+```json
+{
+  "pocModel": "mariadb-only",
+  "tags": [
+    {
+      "name": "category",
+      "type": "FIXED",
+      "value": "nature",
+      "values": ["nature", "landscape"],
+      "weight": "HIGH"
+    }
+  ]
+}
+```
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "mediaUrl": "https://...",
+      "score": 3.092,
+      "matchedTags": ["category"]
+    }
+  ],
+  "pocModel": "mariadb-only",
+  "durationMs": 12
+}
+```
+
+### POST /api/seed
+
+**Request body (optional):**
+```json
+{ "model": "mariadb-only" }
+```
+Omit `model` to seed all registered models.
+
+---
+
+## Seed Data Format (`src/database/seed/seed-data.json`)
+
+```json
+[
+  {
+    "mediaUrl": "https://...",
+    "visualQaScore": 0.92,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "nature",
+        "values": ["nature", "landscape"],
+        "confidenceLevel": "HIGH"
+      }
+    ]
+  }
+]
+```
+
+---
+
+## Adding a New POC Model
+
+1. Add a new value to `PocModelType` in `src/types/index.ts`
+2. Create `src/poc-models/my-model.model.ts` implementing `IPocModel`
+3. Optionally add a DB client in `src/database/clients/`
+4. Add a schema in `src/database/schemas/my-model/`
+5. Register in `src/poc-models/registry.ts`
+
+No other changes needed — the API and frontend automatically pick it up.

@@ -1,0 +1,246 @@
+[
+  {
+    "mediaUrl": "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=800",
+    "visualQaScore": 0.92,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "nature",
+        "values": ["nature", "landscape"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "color",
+        "type": "FIXED",
+        "value": "blue",
+        "values": ["blue", "white"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "description",
+        "type": "FREE_TEXT",
+        "value": "mountain peak covered in snow with blue sky",
+        "values": [],
+        "confidenceLevel": "HIGH"
+      }
+    ]
+  },
+  {
+    "mediaUrl": "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?w=800",
+    "visualQaScore": 0.88,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "nature",
+        "values": ["nature", "water"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "color",
+        "type": "FIXED",
+        "value": "green",
+        "values": ["green", "blue"],
+        "confidenceLevel": "MEDIUM"
+      },
+      {
+        "name": "description",
+        "type": "FREE_TEXT",
+        "value": "calm lake surrounded by pine trees",
+        "values": [],
+        "confidenceLevel": "HIGH"
+      }
+    ]
+  },
+  {
+    "mediaUrl": "https://images.unsplash.com/photo-1449824913935-59a10b8d2000?w=800",
+    "visualQaScore": 0.85,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "urban",
+        "values": ["urban", "city"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "color",
+        "type": "FIXED",
+        "value": "grey",
+        "values": ["grey", "orange"],
+        "confidenceLevel": "MEDIUM"
+      },
+      {
+        "name": "time",
+        "type": "FIXED",
+        "value": "night",
+        "values": ["night"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "description",
+        "type": "FREE_TEXT",
+        "value": "city skyline at night with bright lights",
+        "values": [],
+        "confidenceLevel": "HIGH"
+      }
+    ]
+  },
+  {
+    "mediaUrl": "https://images.unsplash.com/photo-1472214103451-9374bd1c798e?w=800",
+    "visualQaScore": 0.79,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "nature",
+        "values": ["nature", "forest"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "color",
+        "type": "FIXED",
+        "value": "green",
+        "values": ["green", "brown"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "description",
+        "type": "FREE_TEXT",
+        "value": "dense forest with sunlight filtering through trees",
+        "values": [],
+        "confidenceLevel": "MEDIUM"
+      }
+    ]
+  },
+  {
+    "mediaUrl": "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=800",
+    "visualQaScore": 0.95,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "beach",
+        "values": ["beach", "nature"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "color",
+        "type": "FIXED",
+        "value": "blue",
+        "values": ["blue", "yellow"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "time",
+        "type": "FIXED",
+        "value": "day",
+        "values": ["day"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "description",
+        "type": "FREE_TEXT",
+        "value": "tropical beach with crystal clear water and white sand",
+        "values": [],
+        "confidenceLevel": "HIGH"
+      }
+    ]
+  },
+  {
+    "mediaUrl": "https://images.unsplash.com/photo-1518791841217-8f162f1912da?w=800",
+    "visualQaScore": 0.81,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "animals",
+        "values": ["animals", "wildlife"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "subject",
+        "type": "FIXED",
+        "value": "cat",
+        "values": ["cat"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "color",
+        "type": "FIXED",
+        "value": "orange",
+        "values": ["orange", "white"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "description",
+        "type": "FREE_TEXT",
+        "value": "close up portrait of an orange tabby cat",
+        "values": [],
+        "confidenceLevel": "HIGH"
+      }
+    ]
+  },
+  {
+    "mediaUrl": "https://images.unsplash.com/photo-1490730141103-6cac27aaab94?w=800",
+    "visualQaScore": 0.91,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "nature",
+        "values": ["nature", "sky"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "time",
+        "type": "FIXED",
+        "value": "sunset",
+        "values": ["sunset", "evening"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "color",
+        "type": "FIXED",
+        "value": "orange",
+        "values": ["orange", "pink", "purple"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "description",
+        "type": "FREE_TEXT",
+        "value": "stunning sunset with orange and pink sky over the horizon",
+        "values": [],
+        "confidenceLevel": "HIGH"
+      }
+    ]
+  },
+  {
+    "mediaUrl": "https://images.unsplash.com/photo-1414609245224-aea10497cd78?w=800",
+    "visualQaScore": 0.76,
+    "tags": [
+      {
+        "name": "category",
+        "type": "FIXED",
+        "value": "food",
+        "values": ["food"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "color",
+        "type": "FIXED",
+        "value": "red",
+        "values": ["red", "green"],
+        "confidenceLevel": "HIGH"
+      },
+      {
+        "name": "description",
+        "type": "FREE_TEXT",
+        "value": "fresh fruit salad with strawberries and kiwi",
+        "values": [],
+        "confidenceLevel": "MEDIUM"
+      }
+    ]
+  }
+]
