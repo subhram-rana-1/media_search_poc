@@ -79,6 +79,17 @@ const POC_MODELS: {
       { step: 'Top-5 results returned', detail: 'Returns top 5 results sorted by final rank, tiebroken by visual QA score.' },
     ],
   },
+  {
+    value: PocModelType.MARIADB_QDRANT_HYBRID,
+    label: 'MariaDB + Qdrant Hybrid',
+    howItWorks: [
+      { step: 'Mandatory fixed-tag filter (MariaDB)', detail: 'SQL query on one_media_fixed_tag to hard-filter candidates by all mandatory fixed tags.' },
+      { step: 'Optional fixed-tag scoring (MariaDB)', detail: 'Counts how many optional fixed tags each candidate matches to produce rank_1.' },
+      { step: 'Free-text vector search (Qdrant)', detail: 'Builds a combined paragraph from free-text inputs, embeds it, and searches the poc3 Qdrant collection scoped to step-1 candidates for rank_2.' },
+      { step: 'Weighted rank merge', detail: 'Combines rank_1 and rank_2 with equal 50/50 weight into a final score.' },
+      { step: 'Top-5 results returned', detail: 'Sorted by final rank, tiebroken by visual QA score descending.' },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@ export enum PocModelType {
   MARIADB_ONLY = 'mariadb-only',
   MARIADB_QDRANT = 'mariadb-qdrant',
   MARIADB_ELASTIC = 'mariadb-elastic',
+  MARIADB_QDRANT_HYBRID = 'mariadb-qdrant-hybrid',
 }
 
 // ---------------------------------------------------------------------------
