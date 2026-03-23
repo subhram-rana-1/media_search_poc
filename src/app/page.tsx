@@ -68,7 +68,17 @@ const POC_MODELS: {
       { step: 'Top-N results returned', detail: 'Returns results sorted by final rank, filtered by min QA score if set.' },
     ],
   },
-  // MariaDB + Qdrant and MariaDB + Elasticsearch are disabled until those services are configured.
+  {
+    value: PocModelType.MARIADB_QDRANT,
+    label: 'Qdrant Only',
+    howItWorks: [
+      { step: 'Mandatory fixed-tag filter', detail: 'Hard-filters Qdrant points using payload integer indexes on mandatory fixed tags — no DB round-trip.' },
+      { step: 'Free-text vector search', detail: 'Builds a combined paragraph from all free-text inputs, embeds it with OpenAI, and performs cosine similarity search in Qdrant.' },
+      { step: 'Optional fixed-tag scoring', detail: 'Scores the 50 filtered candidates by how many optional fixed tags match (read directly from Qdrant payload — no DB call).' },
+      { step: 'Weighted rank merge', detail: 'Combines vector similarity rank and optional-tag match rank (50/50) into a final score.' },
+      { step: 'Top-5 results returned', detail: 'Returns top 5 results sorted by final rank, tiebroken by visual QA score.' },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------

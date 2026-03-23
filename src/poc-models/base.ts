@@ -10,7 +10,7 @@ import { PocModelType, SeedMedia } from '@/types';
 export interface IPocModel {
   readonly name: PocModelType;
 
-  search(tags: unknown[]): Promise<unknown>;
+  search(tags: unknown[], minQaScore?: number): Promise<unknown>;
 
   seed(data: SeedMedia[]): Promise<void>;
 

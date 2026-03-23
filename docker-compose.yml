@@ -17,6 +17,16 @@ services:
       retries: 5
       start_period: 30s
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: media_search_qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # HTTP REST API
+      - "6334:6334"   # gRPC
+    volumes:
+      - qdrant_data:/qdrant/storage
+
   app:
     build: .
     container_name: media_search_app
@@ -27,12 +37,16 @@ services:
       - .env.local    # reads all vars from .env.local automatically
     environment:
       PORT: 3002
-      # Override DB host so the app reaches the sibling container, not localhost
+      # Override DB host so the app reaches the sibling containers, not localhost
       MARIADB_HOST: mariadb
       MARIADB_PORT: 3306
+      QDRANT_URL: http://qdrant:6333
     depends_on:
       mariadb:
         condition: service_healthy
+      qdrant:
+        condition: service_started
 
 volumes:
   mariadb_data:
+  qdrant_data:

@@ -12,12 +12,6 @@ export function getQdrantClient(): QdrantClient {
   return client;
 }
 
-export const QDRANT_COLLECTION = process.env.QDRANT_COLLECTION ?? 'media_tags';
+export const QDRANT_COLLECTION = process.env.QDRANT_COLLECTION ?? 'media';
 
-/**
- * Vector dimension for tag embeddings.
- * For the POC we use a simple bag-of-words style sparse vector mapped to a
- * fixed-size dense vector.  Change this constant if you swap in a real
- * embedding model.
- */
-export const VECTOR_DIM = 128;
+export const VECTOR_DIM = 1536;

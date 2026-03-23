@@ -1,10 +1,11 @@
 import { PocModelType } from '@/types';
 import { IPocModel } from './base';
 import { MariaDbOnlyModel } from './mariadb-only.model';
+import { MariaDbQdrantModel } from './mariadb-qdrant.model';
 
-// Qdrant and Elasticsearch models are excluded until those services are needed.
 const registry: Partial<Record<PocModelType, IPocModel>> = {
-  [PocModelType.MARIADB_ONLY]: new MariaDbOnlyModel(),
+  [PocModelType.MARIADB_ONLY]:   new MariaDbOnlyModel(),
+  [PocModelType.MARIADB_QDRANT]: new MariaDbQdrantModel(),
 };
 
 export function getModel(pocModel: PocModelType): IPocModel {

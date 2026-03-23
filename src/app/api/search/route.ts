@@ -6,7 +6,6 @@ import {
   Poc1SearchResponse,
 } from '@/types';
 import { getModel } from '@/poc-models/registry';
-import { MariaDbOnlyModel } from '@/poc-models/mariadb-only.model';
 
 export async function POST(request: NextRequest) {
   const start = Date.now();
@@ -33,27 +32,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  try {
-    return await handlePoc1(body, pocModel, start);
-  } catch (err) {
-    console.error('[/api/search] Error:', err);
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : 'Internal server error' },
-      { status: 500 }
-    );
-  }
-}
-
-// ---------------------------------------------------------------------------
-// POC-1 handler
-// ---------------------------------------------------------------------------
-
-async function handlePoc1(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  body: any,
-  pocModel: PocModelType,
-  start: number
-) {
   const mediaTags: Poc1SearchTag[] | undefined = body.mediaTags;
 
   if (!Array.isArray(mediaTags) || mediaTags.length === 0) {
@@ -63,7 +41,7 @@ async function handlePoc1(
     );
   }
 
-  // Validate: FREE_TEXT + isMandatory=true → 400
+  // Validate tags
   for (const tag of mediaTags) {
     if (tag.type === 'FREE_TEXT' && tag.isMandatory === true) {
       return NextResponse.json(
@@ -92,15 +70,22 @@ async function handlePoc1(
       ? Math.min(1, Math.max(0, body.minQaScore))
       : 0;
 
-  const model = getModel(pocModel) as MariaDbOnlyModel;
-  const results = (await model.search(mediaTags, minQaScore)) as Poc1MediaResult[];
+  try {
+    const model = getModel(pocModel as PocModelType);
+    const results = (await model.search(mediaTags, minQaScore)) as Poc1MediaResult[];
 
-  const response: Poc1SearchResponse & { pocModel: string; durationMs: number } = {
-    medias: results,
-    pocModel,
-    durationMs: Date.now() - start,
-  };
+    const response: Poc1SearchResponse & { pocModel: string; durationMs: number } = {
+      medias: results,
+      pocModel,
+      durationMs: Date.now() - start,
+    };
 
-  return NextResponse.json(response);
+    return NextResponse.json(response);
+  } catch (err) {
+    console.error('[/api/search] Error:', err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : 'Internal server error' },
+      { status: 500 }
+    );
+  }
 }
-
