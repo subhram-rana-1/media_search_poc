@@ -52,11 +52,21 @@ function Toast({ toasts, onDismiss }: { toasts: ToastEntry[]; onDismiss: (id: nu
 // POC model list
 // ---------------------------------------------------------------------------
 
-const POC_MODELS: { value: PocModelType; label: string; description: string }[] = [
+const POC_MODELS: {
+  value: PocModelType;
+  label: string;
+  howItWorks: { step: string; detail: string }[];
+}[] = [
   {
     value: PocModelType.MARIADB_ONLY,
-    label: 'MariaDB Only (POC-1)',
-    description: '3-step ranking: fixed tag filter + vector similarity + weighted merge',
+    label: 'MariaDB Only',
+    howItWorks: [
+      { step: 'Mandatory fixed-tag filter', detail: 'Keeps only media that match every mandatory fixed tag.' },
+      { step: 'Optional fixed-tag scoring', detail: 'Scores remaining media by how many optional fixed tags match.' },
+      { step: 'Free-text vector search', detail: 'Generates an embedding for each free-text input, then runs a VECTOR similarity search against stored embeddings.' },
+      { step: 'Weighted score merge', detail: 'Combines fixed-tag score and vector similarity into a single final rank.' },
+      { step: 'Top-N results returned', detail: 'Returns results sorted by final rank, filtered by min QA score if set.' },
+    ],
   },
   // MariaDB + Qdrant and MariaDB + Elasticsearch are disabled until those services are configured.
 ];
@@ -556,7 +566,9 @@ export default function Home() {
 
   const [loading, setLoading] = useState(false);
   const [durationMs, setDurationMs] = useState<number | null>(null);
-  const [seeding, setSeeding] = useState(false);
+  const [migrating, setMigrating] = useState(false);
+  const [showMigrateConfirm, setShowMigrateConfirm] = useState(false);
+  const [showPocInfo, setShowPocInfo] = useState(false);
   const [toasts, setToasts] = useState<ToastEntry[]>([]);
   const toastCounter = useRef(0);
 
@@ -627,25 +639,25 @@ export default function Home() {
     }
   }
 
-  // ── migrate (drop → recreate schema → seed) ──
-  async function handleSeed() {
-    setSeeding(true);
+  async function handleMigrate() {
+    setShowMigrateConfirm(false);
+    setMigrating(true);
     try {
       const res = await fetch('/api/migrate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: selectedModel }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Migration failed');
       const lines = (data.results ?? []).map(
         (r: { model: string; success: boolean; error?: string; durationMs: number }) =>
           `${r.model}: ${r.success ? `OK (${r.durationMs}ms)` : `FAILED — ${r.error}`}`
       );
-      pushToast('success', lines.join('\n'));
+      pushToast('success', lines.join('\n') || 'Migration complete');
     } catch (err) {
       pushToast('error', err instanceof Error ? err.message : 'Migration failed');
     } finally {
-      setSeeding(false);
+      setMigrating(false);
     }
   }
 
@@ -657,10 +669,46 @@ export default function Home() {
 
   return (
     <div className="h-screen bg-gradient-to-br from-slate-50 to-indigo-50 flex flex-col overflow-hidden">
+
+      {/* ── Migration confirmation modal ── */}
+      {showMigrateConfirm && (
+        <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-6">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4">
+            <h2 className="text-lg font-bold text-slate-800">Run Migration?</h2>
+            <p className="text-sm text-slate-600">
+              This will <span className="font-semibold text-red-600">drop and recreate all tables</span> and
+              re-seed fresh data from <code className="bg-slate-100 px-1 rounded text-xs">seed-data.json</code> for
+              all POC models. All existing records will be lost.
+            </p>
+            <div className="flex gap-3 justify-end pt-2">
+              <button
+                onClick={() => setShowMigrateConfirm(false)}
+                className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-medium hover:bg-slate-50 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleMigrate}
+                className="px-4 py-2 rounded-lg bg-red-600 hover:bg-red-700 text-white text-sm font-semibold transition-colors"
+              >
+                Yes, Run Migration
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Sticky navbar */}
       <header className="bg-white border-b border-slate-200 shadow-sm shrink-0">
-        <div className="max-w-screen-2xl mx-auto px-6 py-3">
+        <div className="max-w-screen-2xl mx-auto px-6 py-3 flex items-center justify-between">
           <h1 className="text-lg font-bold text-slate-800">Media Search POC</h1>
+          <button
+            onClick={() => setShowMigrateConfirm(true)}
+            disabled={migrating}
+            className="bg-slate-800 hover:bg-slate-700 disabled:opacity-60 text-white text-sm font-semibold px-4 py-2 rounded-lg transition-colors shadow-sm"
+          >
+            {migrating ? 'Migrating...' : 'Run Migration'}
+          </button>
         </div>
       </header>
 
@@ -710,28 +758,69 @@ export default function Home() {
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               {POC_MODELS.map((m) => (
-                <label
-                  key={m.value}
-                  className={`cursor-pointer border-2 rounded-xl p-4 transition-all ${
-                    selectedModel === m.value
-                      ? 'border-indigo-500 bg-indigo-50'
-                      : 'border-slate-200 hover:border-indigo-300'
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="pocModel"
-                    value={m.value}
-                    checked={selectedModel === m.value}
-                    onChange={() => setSelectedModel(m.value)}
-                    className="sr-only"
-                  />
-                  <div className="font-semibold text-slate-800 text-sm">{m.label}</div>
-                  <div className="text-xs text-slate-500 mt-1">{m.description}</div>
-                </label>
+                <div key={m.value} className="relative group">
+                  <label
+                    className={`block cursor-pointer border-2 rounded-xl p-4 transition-all ${
+                      selectedModel === m.value
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-slate-200 hover:border-indigo-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="pocModel"
+                      value={m.value}
+                      checked={selectedModel === m.value}
+                      onChange={() => setSelectedModel(m.value)}
+                      className="sr-only"
+                    />
+                    <div className="font-semibold text-slate-800 text-sm pr-10">{m.label}</div>
+                  </label>
+                  {/* "What?" button — visible on hover */}
+                  <button
+                    type="button"
+                    onClick={() => { setSelectedModel(m.value); setShowPocInfo(true); }}
+                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-2 py-0.5 rounded-md leading-tight"
+                  >
+                    What?
+                  </button>
+                </div>
               ))}
             </div>
           </section>
+
+          {/* ── POC info modal ── */}
+          {showPocInfo && (() => {
+            const poc = POC_MODELS.find((m) => m.value === selectedModel)!;
+            return (
+              <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-6">
+                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+                  <div className="flex items-start justify-between gap-4">
+                    <h2 className="text-base font-bold text-slate-800">{poc.label} — How it works</h2>
+                    <button
+                      onClick={() => setShowPocInfo(false)}
+                      className="shrink-0 text-slate-400 hover:text-slate-600 text-xl leading-none"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <ol className="space-y-3">
+                    {poc.howItWorks.map((item, i) => (
+                      <li key={i} className="flex gap-3 text-sm">
+                        <span className="shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">
+                          {i + 1}
+                        </span>
+                        <div>
+                          <span className="font-semibold text-slate-800">{item.step}</span>
+                          <span className="text-slate-500"> — {item.detail}</span>
+                        </div>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* ── 2. Tag input ── */}
           <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
@@ -784,14 +873,6 @@ export default function Home() {
 
           {/* ── Sticky action bar ── */}
           <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4 flex gap-3">
-            <button
-              type="button"
-              onClick={handleSeed}
-              disabled={seeding}
-              className="flex-1 bg-white hover:bg-slate-50 disabled:opacity-60 text-slate-700 font-semibold px-6 py-3 rounded-xl border border-slate-300 transition-colors shadow-sm"
-            >
-              {seeding ? 'Seeding...' : 'Run Migration'}
-            </button>
             <button
               type="submit"
               form="search-form"

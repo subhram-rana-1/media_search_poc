@@ -55,7 +55,6 @@ function buildVector(tagStrings: string[]): number[] {
 function tagStrings(tags: SeedMedia['tags'] | SearchTag[]): string[] {
   return tags.flatMap((t) => {
     const parts = [`${t.name}`];
-    if ('value' in t && t.value) parts.push(`${t.name}:${t.value}`);
     if ('values' in t && t.values?.length) {
       t.values.forEach((v) => parts.push(`${t.name}:${v}`));
     }

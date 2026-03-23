@@ -1,5 +1,5 @@
 import { queryMariaDb, withConnection } from '@/database/clients/mariadb';
-import { getEmbedding } from '@/database/clients/openai';
+import { getEmbedding, getEmbeddings } from '@/database/clients/openai';
 import {
   Poc1MediaResult,
   Poc1ResultTag,
@@ -349,67 +349,87 @@ export class MariaDbOnlyModel implements IPocModel {
   // ========================================================================
 
   async seed(data: SeedMedia[]): Promise<void> {
+    if (data.length === 0) return;
+
+    // ── Step 1: Batch INSERT all media rows ──────────────────────────────────
+    const mediaPlaceholders = data.map(() => '(?, ?)').join(', ');
+    const mediaValues = data.flatMap((item) => [item.mediaUrl, item.visualQaScore]);
+    await queryMariaDb(
+      `INSERT INTO media (url, visual_qa_score) VALUES ${mediaPlaceholders}`,
+      mediaValues
+    );
+
+    // ── Step 2: Fetch all newly inserted media ids in one query ──────────────
+    const urlList = data.map((item) => item.mediaUrl);
+    const urlPlaceholders = urlList.map(() => '?').join(', ');
+    const mediaRows = await queryMariaDb<{ id: number; url: string }>(
+      `SELECT id, url FROM media WHERE url IN (${urlPlaceholders})`,
+      urlList
+    );
+    const urlToId = new Map(mediaRows.map((r) => [r.url, r.id]));
+
+    // ── Step 3: Collect and batch INSERT all fixed tag rows ──────────────────
+    const fixedRows: [number, string, string, number][] = [];
     for (const item of data) {
-      // Upsert into shared media table
-      await queryMariaDb(
-        `INSERT INTO media (url, visual_qa_score)
-         VALUES (?, ?)
-         ON DUPLICATE KEY UPDATE visual_qa_score = VALUES(visual_qa_score)`,
-        [item.mediaUrl, item.visualQaScore]
-      );
-
-      const [mediaRow] = await queryMariaDb<{ id: number }>(
-        'SELECT id FROM media WHERE url = ?',
-        [item.mediaUrl]
-      );
-      if (!mediaRow) continue;
-      const mediaId = mediaRow.id;
-
-      // Clear existing tags for idempotency
-      await queryMariaDb(
-        'DELETE FROM one_media_fixed_tag WHERE media_id = ?',
-        [mediaId]
-      );
-      await queryMariaDb(
-        'DELETE FROM one_media_free_text_tag WHERE media_id = ?',
-        [mediaId]
-      );
-
+      const mediaId = urlToId.get(item.mediaUrl);
+      if (mediaId === undefined) continue;
       for (const tag of item.tags) {
+        if (tag.type !== 'FIXED') continue;
         const confInt = CONFIDENCE_TO_INT[tag.confidenceLevel] ?? 2;
-
-        if (tag.type === 'FIXED') {
-          // For FIXED tags with a `values` array, insert one row per value
-          // Also insert the primary `value` if present
-          const allValues = new Set<string>();
-          if (tag.value) allValues.add(tag.value);
-          if (tag.values?.length) {
-            tag.values.forEach((v) => { if (v) allValues.add(v); });
-          }
-
-          for (const val of allValues) {
-            await queryMariaDb(
-              `INSERT INTO one_media_fixed_tag (media_id, name, value, confidence_level)
-               VALUES (?, ?, ?, ?)`,
-              [mediaId, tag.name, val, confInt]
-            );
-          }
-        } else {
-          // FREE_TEXT — generate embedding via OpenAI
-          const text = tag.value || '';
-          if (!text) continue;
-
-          const embedding = await getEmbedding(text);
-          const vecStr = `[${embedding.join(',')}]`;
-
-          await queryMariaDb(
-            `INSERT INTO one_media_free_text_tag (media_id, name, value, confidence_level, embedding)
-             VALUES (?, ?, ?, ?, VEC_FromText(?))`,
-            [mediaId, tag.name, text, confInt, vecStr]
-          );
+        const uniqueVals = [...new Set(tag.values.filter(Boolean))];
+        for (const val of uniqueVals) {
+          fixedRows.push([mediaId, tag.name, val, confInt]);
         }
       }
     }
+
+    if (fixedRows.length > 0) {
+      const fixedPlaceholders = fixedRows.map(() => '(?, ?, ?, ?)').join(', ');
+      const fixedValues = fixedRows.flat();
+      await queryMariaDb(
+        `INSERT INTO one_media_fixed_tag (media_id, name, value, confidence_level) VALUES ${fixedPlaceholders}`,
+        fixedValues
+      );
+    }
+
+    // ── Step 4: Collect all FREE_TEXT tag items ───────────────────────────────
+    const freeTextItems: { mediaId: number; name: string; text: string; confInt: number }[] = [];
+    for (const item of data) {
+      const mediaId = urlToId.get(item.mediaUrl);
+      if (mediaId === undefined) continue;
+      for (const tag of item.tags) {
+        if (tag.type !== 'FREE_TEXT') continue;
+        const text = tag.value || '';
+        if (!text) continue;
+        const confInt = CONFIDENCE_TO_INT[tag.confidenceLevel] ?? 2;
+        freeTextItems.push({ mediaId, name: tag.name, text, confInt });
+      }
+    }
+
+    if (freeTextItems.length === 0) return;
+
+    // ── Step 5: Fetch all embeddings in chunks of 500 ────────────────────────
+    const CHUNK_SIZE = 500;
+    const texts = freeTextItems.map((ft) => ft.text);
+    const allEmbeddings: number[][] = [];
+    for (let i = 0; i < texts.length; i += CHUNK_SIZE) {
+      const chunk = await getEmbeddings(texts.slice(i, i + CHUNK_SIZE));
+      allEmbeddings.push(...chunk);
+    }
+
+    // ── Step 6: Batch INSERT all free-text tag rows ───────────────────────────
+    const freeTextPlaceholders = freeTextItems.map(() => '(?, ?, ?, ?, VEC_FromText(?))').join(', ');
+    const freeTextValues = freeTextItems.flatMap((ft, idx) => [
+      ft.mediaId,
+      ft.name,
+      ft.text,
+      ft.confInt,
+      `[${allEmbeddings[idx].join(',')}]`,
+    ]);
+    await queryMariaDb(
+      `INSERT INTO one_media_free_text_tag (media_id, name, value, confidence_level, embedding) VALUES ${freeTextPlaceholders}`,
+      freeTextValues
+    );
   }
 
   // ========================================================================
