@@ -90,6 +90,17 @@ const POC_MODELS: {
       { step: 'Top-5 results returned', detail: 'Sorted by final rank, tiebroken by visual QA score descending.' },
     ],
   },
+  {
+    value: PocModelType.MARIADB_ELASTIC,
+    label: 'Elasticsearch Only',
+    howItWorks: [
+      { step: 'Mandatory fixed-tag filter (ES bool.must)', detail: 'Term queries on integer fixed-tag fields hard-filter candidates — no MariaDB at search time.' },
+      { step: 'Optional fixed-tag scoring (ES function_score)', detail: 'Each matching optional tag adds +1 via function_score, scored entirely inside ES.' },
+      { step: 'Free-text vector search (ES knn)', detail: 'Embeds query with OpenAI, runs cosine knn on the dense_vector field stored in ES.' },
+      { step: 'RRF rank fusion', detail: 'Reciprocal Rank Fusion combines function_score and knn ranked lists natively in a single ES request.' },
+      { step: 'Top-5 results returned', detail: 'Sorted by RRF score descending, tiebroken by visual QA score. All data read from ES — zero DB round-trips.' },
+    ],
+  },
 ];
 
 // ---------------------------------------------------------------------------

@@ -14,4 +14,4 @@ export function getElasticsearchClient(): Client {
   return client;
 }
 
-export const ES_INDEX = process.env.ELASTICSEARCH_INDEX ?? 'media_tags';
+export const ES_INDEX = process.env.ELASTICSEARCH_INDEX ?? 'media_poc4';

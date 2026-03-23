@@ -24,7 +24,7 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 // All 17 FIXED tag names from poc1-tag-definitions.ts, lowercased to snake_case.
 // ---------------------------------------------------------------------------
 
-const FIXED_TAG_FIELD: Record<string, string> = {
+export const FIXED_TAG_FIELD: Record<string, string> = {
   Setting:           'setting',
   Country:           'country',
   TimeOfDay:         'time_of_day',
@@ -48,7 +48,7 @@ const FIXED_TAG_FIELD: Record<string, string> = {
 // Fixed-tag value → integer mapping (1-indexed from options array order)
 // ---------------------------------------------------------------------------
 
-const FIXED_TAG_VALUE_MAP: Record<string, Record<string, number>> = {
+export const FIXED_TAG_VALUE_MAP: Record<string, Record<string, number>> = {
   Setting: { Indoor: 1, Outdoor: 2 },
   Country: {
     AFGHANISTAN: 1, ALBANIA: 2, ALGERIA: 3, ANDORRA: 4, ANGOLA: 5,
