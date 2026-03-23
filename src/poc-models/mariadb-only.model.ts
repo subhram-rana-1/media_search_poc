@@ -14,6 +14,12 @@ import { IPocModel } from './base';
 // Helpers
 // ---------------------------------------------------------------------------
 
+function chunkArray<T>(arr: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) chunks.push(arr.slice(i, i + size));
+  return chunks;
+}
+
 const CONFIDENCE_TO_INT: Record<string, number> = {
   [ConfidenceLevel.LOW]: 1,
   [ConfidenceLevel.MEDIUM]: 2,
@@ -351,22 +357,29 @@ export class MariaDbOnlyModel implements IPocModel {
   async seed(data: SeedMedia[]): Promise<void> {
     if (data.length === 0) return;
 
-    // ── Step 1: Batch INSERT all media rows ──────────────────────────────────
-    const mediaPlaceholders = data.map(() => '(?, ?)').join(', ');
-    const mediaValues = data.flatMap((item) => [item.mediaUrl, item.visualQaScore]);
-    await queryMariaDb(
-      `INSERT INTO media (url, visual_qa_score) VALUES ${mediaPlaceholders}`,
-      mediaValues
-    );
+    // ── Step 1: Batch INSERT all media rows (2 000 rows / batch) ──────────────
+    const MEDIA_BATCH = 2_000;
+    for (const chunk of chunkArray(data, MEDIA_BATCH)) {
+      const mediaPlaceholders = chunk.map(() => '(?, ?)').join(', ');
+      const mediaValues = chunk.flatMap((item) => [item.mediaUrl, item.visualQaScore]);
+      await queryMariaDb(
+        `INSERT INTO media (url, visual_qa_score) VALUES ${mediaPlaceholders}`,
+        mediaValues
+      );
+    }
 
-    // ── Step 2: Fetch all newly inserted media ids in one query ──────────────
+    // ── Step 2: Fetch all newly inserted media ids in batches of 5 000 ───────
     const urlList = data.map((item) => item.mediaUrl);
-    const urlPlaceholders = urlList.map(() => '?').join(', ');
-    const mediaRows = await queryMariaDb<{ id: number; url: string }>(
-      `SELECT id, url FROM media WHERE url IN (${urlPlaceholders})`,
-      urlList
-    );
-    const urlToId = new Map(mediaRows.map((r) => [r.url, r.id]));
+    const urlToId = new Map<string, number>();
+    const URL_BATCH = 5_000;
+    for (const chunk of chunkArray(urlList, URL_BATCH)) {
+      const urlPlaceholders = chunk.map(() => '?').join(', ');
+      const mediaRows = await queryMariaDb<{ id: number; url: string }>(
+        `SELECT id, url FROM media WHERE url IN (${urlPlaceholders})`,
+        chunk
+      );
+      for (const r of mediaRows) urlToId.set(r.url, r.id);
+    }
 
     // ── Step 3: Collect and batch INSERT all fixed tag rows ──────────────────
     const fixedRows: [number, string, string, number][] = [];
@@ -384,12 +397,15 @@ export class MariaDbOnlyModel implements IPocModel {
     }
 
     if (fixedRows.length > 0) {
-      const fixedPlaceholders = fixedRows.map(() => '(?, ?, ?, ?)').join(', ');
-      const fixedValues = fixedRows.flat();
-      await queryMariaDb(
-        `INSERT INTO one_media_fixed_tag (media_id, name, value, confidence_level) VALUES ${fixedPlaceholders}`,
-        fixedValues
-      );
+      const FIXED_BATCH = 2_000;
+      for (const chunk of chunkArray(fixedRows, FIXED_BATCH)) {
+        const fixedPlaceholders = chunk.map(() => '(?, ?, ?, ?)').join(', ');
+        const fixedValues = chunk.flat();
+        await queryMariaDb(
+          `INSERT INTO one_media_fixed_tag (media_id, name, value, confidence_level) VALUES ${fixedPlaceholders}`,
+          fixedValues
+        );
+      }
     }
 
     // ── Step 4: Collect all FREE_TEXT tag items ───────────────────────────────
@@ -417,19 +433,23 @@ export class MariaDbOnlyModel implements IPocModel {
       allEmbeddings.push(...chunk);
     }
 
-    // ── Step 6: Batch INSERT all free-text tag rows ───────────────────────────
-    const freeTextPlaceholders = freeTextItems.map(() => '(?, ?, ?, ?, VEC_FromText(?))').join(', ');
-    const freeTextValues = freeTextItems.flatMap((ft, idx) => [
-      ft.mediaId,
-      ft.name,
-      ft.text,
-      ft.confInt,
-      `[${allEmbeddings[idx].join(',')}]`,
-    ]);
-    await queryMariaDb(
-      `INSERT INTO one_media_free_text_tag (media_id, name, value, confidence_level, embedding) VALUES ${freeTextPlaceholders}`,
-      freeTextValues
-    );
+    // ── Step 6: Batch INSERT free-text tag rows in tiny batches (50 rows × ~14 KB embedding ≈ 700 KB/batch) ──
+    const FREE_TEXT_BATCH = 50;
+    for (let start = 0; start < freeTextItems.length; start += FREE_TEXT_BATCH) {
+      const chunkItems = freeTextItems.slice(start, start + FREE_TEXT_BATCH);
+      const freeTextPlaceholders = chunkItems.map(() => '(?, ?, ?, ?, VEC_FromText(?))').join(', ');
+      const freeTextValues = chunkItems.flatMap((ft, idx) => [
+        ft.mediaId,
+        ft.name,
+        ft.text,
+        ft.confInt,
+        `[${allEmbeddings[start + idx].join(',')}]`,
+      ]);
+      await queryMariaDb(
+        `INSERT INTO one_media_free_text_tag (media_id, name, value, confidence_level, embedding) VALUES ${freeTextPlaceholders}`,
+        freeTextValues
+      );
+    }
   }
 
   // ========================================================================
