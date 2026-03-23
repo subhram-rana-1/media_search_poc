@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   PocModelType,
   Poc1MediaResult,
-  Poc1ResultTag,
+  Poc1SearchTag,
 } from '@/types';
 import { FIXED_TAG_DEFS, FREE_TEXT_TAG_DEFS } from './poc1-tag-definitions';
 
@@ -91,6 +91,17 @@ const POC_MODELS: {
     ],
   },
 ];
+
+// ---------------------------------------------------------------------------
+// Per-model result types
+// ---------------------------------------------------------------------------
+
+type ModelResult = {
+  medias: Poc1MediaResult[];
+  durationMs: number;
+};
+
+type ModelStatus = 'idle' | 'loading' | 'success' | 'error';
 
 // ---------------------------------------------------------------------------
 // POC-1 state types
@@ -241,7 +252,7 @@ function MultiSelectDropdown({
 }
 
 // ---------------------------------------------------------------------------
-// Chip text input component (replaces AutoTextarea for free-text tags)
+// Chip text input component
 // ---------------------------------------------------------------------------
 
 function ChipTextInput({
@@ -571,28 +582,62 @@ function initFreeTags(): FreeTextTagState[] {
 }
 
 // ---------------------------------------------------------------------------
+// Spinner helper
+// ---------------------------------------------------------------------------
+
+function Spinner({ className }: { className?: string }) {
+  return (
+    <svg className={`animate-spin ${className ?? 'w-4 h-4'}`} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+    </svg>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
-export default function Home() {
-  const [selectedModel, setSelectedModel] = useState<PocModelType>(PocModelType.MARIADB_ONLY);
+const INIT_MODEL_STATUS: Record<PocModelType, ModelStatus> = {
+  [PocModelType.MARIADB_ONLY]: 'idle',
+  [PocModelType.MARIADB_QDRANT]: 'idle',
+  [PocModelType.MARIADB_QDRANT_HYBRID]: 'idle',
+  [PocModelType.MARIADB_ELASTIC]: 'idle',
+};
 
-  // Shared tag inputs — same for all models
+export default function Home() {
+  // ── Per-model state ──
+  const [activeTab, setActiveTab] = useState<PocModelType>(PocModelType.MARIADB_ONLY);
+  const [modelResults, setModelResults] = useState<Partial<Record<PocModelType, ModelResult>>>({});
+  const [modelStatus, setModelStatus] = useState<Record<PocModelType, ModelStatus>>(INIT_MODEL_STATUS);
+  const [modelErrors, setModelErrors] = useState<Partial<Record<PocModelType, string>>>({});
+
+  // ── Shared form state ──
   const [fixedTags, setFixedTags] = useState<FixedTagState[]>(initFixedTags);
   const [freeTags, setFreeTags] = useState<FreeTextTagState[]>(initFreeTags);
   const [minQaScore, setMinQaScore] = useState<number>(0);
 
-  // Results — unified: poc1Results used for all models
-  const [poc1Results, setPoc1Results] = useState<Poc1MediaResult[] | null>(null);
-
-  const [loading, setLoading] = useState(false);
-  const [durationMs, setDurationMs] = useState<number | null>(null);
+  // ── UI state ──
   const [migrating, setMigrating] = useState(false);
   const [showMigrateConfirm, setShowMigrateConfirm] = useState(false);
-  const [showPocInfo, setShowPocInfo] = useState(false);
+  const [infoModel, setInfoModel] = useState<PocModelType | null>(null);
   const [toasts, setToasts] = useState<ToastEntry[]>([]);
+  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
   const toastCounter = useRef(0);
 
+  // Stores the last search input for the download JSON
+  const lastSearchInput = useRef<{ mediaTags: Poc1SearchTag[]; minQaScore: number } | null>(null);
+
+  // ── Derived ──
+  const isAnyLoading = POC_MODELS.some((m) => modelStatus[m.value] === 'loading');
+  const allModelsSuccess = POC_MODELS.every((m) => modelStatus[m.value] === 'success');
+  const hasAnySearchStarted = POC_MODELS.some((m) => modelStatus[m.value] !== 'idle');
+
+  const activeResult = modelResults[activeTab];
+  const activeStatus = modelStatus[activeTab];
+  const activeError = modelErrors[activeTab];
+
+  // ── Toast helpers ──
   function pushToast(type: 'success' | 'error', message: string) {
     const id = ++toastCounter.current;
     setToasts((prev) => [...prev, { id, type, message }]);
@@ -602,7 +647,7 @@ export default function Home() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }
 
-  // ── handlers ──
+  // ── Tag handlers ──
   function updateFixedTag(index: number, patch: Partial<FixedTagState>) {
     setFixedTags((prev) => prev.map((t, i) => (i === index ? { ...t, ...patch } : t)));
   }
@@ -610,56 +655,106 @@ export default function Home() {
     setFreeTags((prev) => prev.map((t, i) => (i === index ? { ...t, values } : t)));
   }
 
-  // ── search ──
+  // ── Search: fires all POC model APIs in parallel ──
   async function handleSearch(e: React.FormEvent) {
     e.preventDefault();
-    setPoc1Results(null);
-    setDurationMs(null);
-    setLoading(true);
 
-    try {
-      const mediaTags = [
-        ...fixedTags
-          .filter((t) => t.selectedValues.length > 0)
-          .map((t) => ({
-            name: t.name,
-            type: 'FIXED' as const,
-            values: t.selectedValues.join(','),
-            isMandatory: t.isMandatory,
-          })),
-        ...freeTags
-          .filter((t) => t.values.length > 0)
-          .map((t) => ({
-            name: t.name,
-            type: 'FREE_TEXT' as const,
-            values: t.values.join(','),
-            isMandatory: false,
-          })),
-      ];
+    const mediaTags: Poc1SearchTag[] = [
+      ...fixedTags
+        .filter((t) => t.selectedValues.length > 0)
+        .map((t) => ({
+          name: t.name,
+          type: 'FIXED' as const,
+          values: t.selectedValues.join(','),
+          isMandatory: t.isMandatory,
+        })),
+      ...freeTags
+        .filter((t) => t.values.length > 0)
+        .map((t) => ({
+          name: t.name,
+          type: 'FREE_TEXT' as const,
+          values: t.values.join(','),
+          isMandatory: false,
+        })),
+    ];
 
-      if (mediaTags.length === 0) {
-        pushToast('error', 'Please select at least one tag value before searching.');
-        setLoading(false);
-        return;
-      }
+    if (mediaTags.length === 0) {
+      pushToast('error', 'Please select at least one tag value before searching.');
+      return;
+    }
 
-      const res = await fetch('/api/search', {
+    // Reset all models to loading
+    const loadingStatus = POC_MODELS.reduce((acc, m) => {
+      acc[m.value] = 'loading';
+      return acc;
+    }, { ...INIT_MODEL_STATUS });
+
+    setModelResults({});
+    setModelErrors({});
+    setModelStatus(loadingStatus);
+    setActiveTab(PocModelType.MARIADB_ONLY);
+    lastSearchInput.current = { mediaTags, minQaScore };
+
+    // Track first successful model to auto-switch tab
+    let firstSuccessSet = false;
+
+    const promises = POC_MODELS.map((m) =>
+      fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pocModel: selectedModel, mediaTags, minQaScore }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Search failed');
+        body: JSON.stringify({ pocModel: m.value, mediaTags, minQaScore }),
+      })
+        .then(async (res) => {
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error ?? 'Search failed');
+          setModelResults((prev) => ({
+            ...prev,
+            [m.value]: { medias: data.medias ?? [], durationMs: data.durationMs ?? 0 },
+          }));
+          setModelStatus((prev) => ({ ...prev, [m.value]: 'success' }));
+          if (!firstSuccessSet) {
+            firstSuccessSet = true;
+            setActiveTab(m.value);
+          }
+        })
+        .catch((err) => {
+          const msg = err instanceof Error ? err.message : 'Search failed';
+          setModelStatus((prev) => ({ ...prev, [m.value]: 'error' }));
+          setModelErrors((prev) => ({ ...prev, [m.value]: msg }));
+          pushToast('error', `${m.label}: ${msg}`);
+        })
+    );
 
-      setDurationMs(data.durationMs ?? null);
-      setPoc1Results(data.medias ?? []);
-    } catch (err) {
-      pushToast('error', err instanceof Error ? err.message : 'Unknown error');
-    } finally {
-      setLoading(false);
-    }
+    await Promise.allSettled(promises);
   }
 
+  // ── Download all results as JSON ──
+  function handleDownload() {
+    if (!lastSearchInput.current) return;
+
+    const resultsPayload: Record<string, { durationMs: number; medias: Poc1MediaResult[] }> = {};
+    for (const m of POC_MODELS) {
+      const r = modelResults[m.value];
+      if (r) resultsPayload[m.value] = r;
+    }
+
+    const payload = {
+      searchInput: lastSearchInput.current,
+      results: resultsPayload,
+    };
+
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `media-search-results-${Date.now()}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ── Migrate ──
   async function handleMigrate() {
     setShowMigrateConfirm(false);
     setMigrating(true);
@@ -682,11 +777,23 @@ export default function Home() {
     }
   }
 
-  const resultCount = poc1Results?.length ?? 0;
-  const hasResults = poc1Results !== null;
+  // ── Tab styling helper ──
+  function getTabClasses(modelValue: PocModelType): string {
+    const status = modelStatus[modelValue];
+    const isActive = activeTab === modelValue;
 
-  // Lightbox
-  const [lightboxUrl, setLightboxUrl] = useState<string | null>(null);
+    if (isActive) {
+      if (status === 'error') return 'bg-red-600 text-white border-red-500';
+      return 'bg-indigo-600 text-white border-indigo-500';
+    }
+
+    switch (status) {
+      case 'success': return 'bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-emerald-200 cursor-pointer';
+      case 'loading': return 'bg-amber-50 text-amber-600 border-amber-200 cursor-default';
+      case 'error':   return 'bg-red-50 text-red-500 border-red-200 hover:bg-red-100 cursor-pointer';
+      default:        return 'bg-slate-100 text-slate-400 border-slate-200 cursor-default';
+    }
+  }
 
   return (
     <div className="h-screen bg-gradient-to-br from-slate-50 to-indigo-50 flex flex-col overflow-hidden">
@@ -718,6 +825,39 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      {/* ── POC info modal ── */}
+      {infoModel !== null && (() => {
+        const poc = POC_MODELS.find((m) => m.value === infoModel)!;
+        return (
+          <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-6">
+            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
+              <div className="flex items-start justify-between gap-4">
+                <h2 className="text-base font-bold text-slate-800">{poc.label} — How it works</h2>
+                <button
+                  onClick={() => setInfoModel(null)}
+                  className="shrink-0 text-slate-400 hover:text-slate-600 text-xl leading-none"
+                >
+                  ×
+                </button>
+              </div>
+              <ol className="space-y-3">
+                {poc.howItWorks.map((item, i) => (
+                  <li key={i} className="flex gap-3 text-sm">
+                    <span className="shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">
+                      {i + 1}
+                    </span>
+                    <div>
+                      <span className="font-semibold text-slate-800">{item.step}</span>
+                      <span className="text-slate-500"> — {item.detail}</span>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Sticky navbar */}
       <header className="bg-white border-b border-slate-200 shadow-sm shrink-0">
@@ -770,137 +910,72 @@ export default function Home() {
 
           {/* Scrollable form content */}
           <div className="flex-1 overflow-y-auto px-6 py-6 space-y-4">
-        <form id="search-form" onSubmit={handleSearch} className="space-y-4">
+            <form id="search-form" onSubmit={handleSearch} className="space-y-4">
 
-          {/* ── 1. Model selector ── */}
-          <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4">
-              1. Select POC Model
-            </h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              {POC_MODELS.map((m) => (
-                <div key={m.value} className="relative group">
-                  <label
-                    className={`block cursor-pointer border-2 rounded-xl p-4 transition-all ${
-                      selectedModel === m.value
-                        ? 'border-indigo-500 bg-indigo-50'
-                        : 'border-slate-200 hover:border-indigo-300'
-                    }`}
-                  >
-                    <input
-                      type="radio"
-                      name="pocModel"
-                      value={m.value}
-                      checked={selectedModel === m.value}
-                      onChange={() => setSelectedModel(m.value)}
-                      className="sr-only"
-                    />
-                    <div className="font-semibold text-slate-800 text-sm pr-10">{m.label}</div>
+              {/* ── 1. Tag input ── */}
+              <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                  <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">
+                    1. Define Search Tags
+                  </h2>
+                  <span className="text-xs text-slate-400">
+                    Select at least one tag · Mandatory applies to FIXED tags only
+                  </span>
+                </div>
+                <Poc1TagMatrix
+                  fixedTags={fixedTags}
+                  freeTags={freeTags}
+                  onFixedChange={updateFixedTag}
+                  onFreeChange={updateFreeTag}
+                />
+              </section>
+
+              {/* ── 2. Min QA Score ── */}
+              <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4">
+                  2. Quality Filter
+                </h2>
+                <div className="flex items-center gap-4">
+                  <label className="text-sm font-medium text-slate-600 whitespace-nowrap">
+                    Min QA Score
                   </label>
-                  {/* "What?" button — visible on hover */}
-                  <button
-                    type="button"
-                    onClick={() => { setSelectedModel(m.value); setShowPocInfo(true); }}
-                    className="absolute top-3 right-3 opacity-0 group-hover:opacity-100 transition-opacity bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold px-2 py-0.5 rounded-md leading-tight"
-                  >
-                    What?
-                  </button>
+                  <input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={minQaScore}
+                    onChange={(e) => {
+                      const v = parseFloat(e.target.value);
+                      setMinQaScore(isNaN(v) ? 0 : Math.min(1, Math.max(0, v)));
+                    }}
+                    className="w-28 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  />
+                  <span className="text-xs text-slate-400">
+                    Range 0 – 1 · Results below this threshold will be excluded
+                  </span>
                 </div>
-              ))}
-            </div>
-          </section>
+              </section>
 
-          {/* ── POC info modal ── */}
-          {showPocInfo && (() => {
-            const poc = POC_MODELS.find((m) => m.value === selectedModel)!;
-            return (
-              <div className="fixed inset-0 z-[70] bg-black/50 flex items-center justify-center p-6">
-                <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <h2 className="text-base font-bold text-slate-800">{poc.label} — How it works</h2>
-                    <button
-                      onClick={() => setShowPocInfo(false)}
-                      className="shrink-0 text-slate-400 hover:text-slate-600 text-xl leading-none"
-                    >
-                      ×
-                    </button>
-                  </div>
-                  <ol className="space-y-3">
-                    {poc.howItWorks.map((item, i) => (
-                      <li key={i} className="flex gap-3 text-sm">
-                        <span className="shrink-0 w-5 h-5 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs">
-                          {i + 1}
-                        </span>
-                        <div>
-                          <span className="font-semibold text-slate-800">{item.step}</span>
-                          <span className="text-slate-500"> — {item.detail}</span>
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                </div>
-              </div>
-            );
-          })()}
-
-          {/* ── 2. Tag input ── */}
-          <section className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
-            <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">
-                2. Define Search Tags
-              </h2>
-              <span className="text-xs text-slate-400">
-                Select at least one tag · Mandatory applies to FIXED tags only
-              </span>
-            </div>
-            <Poc1TagMatrix
-              fixedTags={fixedTags}
-              freeTags={freeTags}
-              onFixedChange={updateFixedTag}
-              onFreeChange={updateFreeTag}
-            />
-          </section>
-
-          {/* ── 3. Min QA Score ── */}
-          <section className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wider mb-4">
-              3. Quality Filter
-            </h2>
-            <div className="flex items-center gap-4">
-              <label className="text-sm font-medium text-slate-600 whitespace-nowrap">
-                Min QA Score
-              </label>
-              <input
-                type="number"
-                min={0}
-                max={1}
-                step={0.01}
-                value={minQaScore}
-                onChange={(e) => {
-                  const v = parseFloat(e.target.value);
-                  setMinQaScore(isNaN(v) ? 0 : Math.min(1, Math.max(0, v)));
-                }}
-                className="w-28 border border-slate-300 rounded-lg px-3 py-2 text-sm text-slate-800 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-              />
-              <span className="text-xs text-slate-400">
-                Range 0 – 1 · Results below this threshold will be excluded
-              </span>
-            </div>
-          </section>
-
-        </form>
-
-          </div>{/* end scrollable form area */}
+            </form>
+          </div>
 
           {/* ── Sticky action bar ── */}
           <div className="shrink-0 border-t border-slate-200 bg-white px-6 py-4 flex gap-3">
             <button
               type="submit"
               form="search-form"
-              disabled={loading}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-6 py-3 rounded-xl transition-colors shadow-sm"
+              disabled={isAnyLoading}
+              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-semibold px-6 py-3 rounded-xl transition-colors shadow-sm flex items-center justify-center gap-2"
             >
-              {loading ? 'Searching...' : 'Search'}
+              {isAnyLoading ? (
+                <>
+                  <Spinner className="w-4 h-4" />
+                  Searching...
+                </>
+              ) : (
+                'Search'
+              )}
             </button>
           </div>
 
@@ -909,23 +984,100 @@ export default function Home() {
         {/* ── Right panel: 40% width, independently scrollable ── */}
         <div className="w-[40%] shrink-0 flex flex-col" style={{ minHeight: 0 }}>
 
-          {/* Results header — sticky within right panel */}
-          <div className="shrink-0 px-6 pt-6 pb-3 border-b border-slate-100 bg-slate-50/80">
-            <h2 className="text-base font-bold text-slate-800">
-              Results
-              {hasResults && (
-                <span className="ml-2 text-sm font-normal text-slate-500">
-                  {resultCount} item{resultCount !== 1 ? 's' : ''}
-                  {durationMs !== null ? ` · ${durationMs}ms` : ''}
-                  {' · '}{selectedModel}
+          {/* ── Results header + Tab bar ── */}
+          <div className="shrink-0 bg-white border-b border-slate-200">
+
+            {/* Title row + download button */}
+            <div className="px-6 pt-4 pb-2 flex items-center justify-between gap-3">
+              <h2 className="text-base font-bold text-slate-800">Results</h2>
+              {allModelsSuccess && (
+                <button
+                  type="button"
+                  onClick={handleDownload}
+                  className="flex items-center gap-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors shadow-sm"
+                >
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                  </svg>
+                  Download JSON
+                </button>
+              )}
+            </div>
+
+            {/* Tab strip */}
+            <div className="px-4 flex gap-1 items-end">
+              {POC_MODELS.map((m) => {
+                const status = modelStatus[m.value];
+                const isActive = activeTab === m.value;
+                const isClickable = status === 'success' || status === 'error' || isActive;
+
+                return (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => isClickable && setActiveTab(m.value)}
+                    className={`relative flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-t-lg border border-b-0 transition-all select-none ${getTabClasses(m.value)}`}
+                  >
+                    {/* Status icon */}
+                    {status === 'loading' && <Spinner className="w-3 h-3" />}
+                    {status === 'success' && !isActive && (
+                      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                      </svg>
+                    )}
+                    {status === 'error' && (
+                      <svg className="w-3 h-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                      </svg>
+                    )}
+
+                    <span>{m.label}</span>
+
+                    {/* "?" info button */}
+                    <span
+                      role="button"
+                      title={`How ${m.label} works`}
+                      onClick={(e) => { e.stopPropagation(); setInfoModel(m.value); }}
+                      className={`w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0 transition-colors ${
+                        isActive
+                          ? 'bg-white/20 text-white hover:bg-white/40'
+                          : 'bg-slate-200/80 text-slate-500 hover:bg-slate-300'
+                      }`}
+                    >
+                      ?
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Active tab stats */}
+            <div className="px-6 py-2 min-h-[32px] flex items-center">
+              {activeResult && (
+                <span className="text-xs text-slate-500">
+                  {activeResult.medias.length} item{activeResult.medias.length !== 1 ? 's' : ''} · {activeResult.durationMs}ms
                 </span>
               )}
-            </h2>
+              {!activeResult && activeStatus === 'loading' && (
+                <span className="text-xs text-amber-500 flex items-center gap-1.5">
+                  <Spinner className="w-3 h-3" />
+                  Running search...
+                </span>
+              )}
+              {!activeResult && activeStatus === 'error' && (
+                <span className="text-xs text-red-500 truncate">{activeError ?? 'Search failed'}</span>
+              )}
+              {!activeResult && activeStatus === 'idle' && (
+                <span className="text-xs text-slate-400">Search results will appear here</span>
+              )}
+            </div>
           </div>
 
           {/* Scrollable results list */}
           <div className="flex-1 overflow-y-auto px-6 py-4">
-            {!hasResults && (
+
+            {/* Pre-search placeholder */}
+            {!hasAnySearchStarted && (
               <div className="flex flex-col items-center justify-center h-64 text-slate-300">
                 <svg className="w-16 h-16 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1}
@@ -935,7 +1087,31 @@ export default function Home() {
               </div>
             )}
 
-            {hasResults && resultCount === 0 && (
+            {/* Loading state for this tab */}
+            {hasAnySearchStarted && activeStatus === 'loading' && (
+              <div className="flex flex-col items-center justify-center h-64 text-amber-400 gap-3">
+                <Spinner className="w-10 h-10" />
+                <p className="text-sm text-slate-400">Searching with {POC_MODELS.find(m => m.value === activeTab)?.label}...</p>
+              </div>
+            )}
+
+            {/* Error state for this tab */}
+            {hasAnySearchStarted && activeStatus === 'error' && (
+              <div className="flex flex-col items-center justify-center h-64 gap-3">
+                <div className="w-12 h-12 rounded-full bg-red-100 flex items-center justify-center">
+                  <svg className="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div className="text-center">
+                  <p className="text-sm font-semibold text-red-600 mb-1">Search failed</p>
+                  <p className="text-xs text-slate-400 max-w-[260px] break-words">{activeError}</p>
+                </div>
+              </div>
+            )}
+
+            {/* No results */}
+            {hasAnySearchStarted && activeStatus === 'success' && activeResult?.medias.length === 0 && (
               <div className="flex flex-col items-center justify-center h-64 text-slate-400">
                 <svg className="w-12 h-12 mb-3 opacity-40" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
@@ -945,9 +1121,10 @@ export default function Home() {
               </div>
             )}
 
-            {hasResults && resultCount > 0 && (
+            {/* Results cards */}
+            {hasAnySearchStarted && activeStatus === 'success' && activeResult && activeResult.medias.length > 0 && (
               <div className="space-y-4">
-                {poc1Results!.map((result) => (
+                {activeResult.medias.map((result) => (
                   <Poc1MediaCard
                     key={result.id}
                     result={result}
@@ -956,6 +1133,7 @@ export default function Home() {
                 ))}
               </div>
             )}
+
           </div>
 
         </div>{/* end right panel */}
