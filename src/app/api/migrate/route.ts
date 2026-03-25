@@ -13,6 +13,7 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     targetModel = body?.model;
+    
   } catch {
     // no body is fine
   }

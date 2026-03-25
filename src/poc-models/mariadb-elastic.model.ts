@@ -8,6 +8,7 @@ import {
   Poc1MediaResult,
 } from '@/types';
 import { IPocModel } from './base';
+import { fetchAllTags } from './tag-helpers';
 import {
   FIXED_TAG_FIELD,
   FIXED_TAG_VALUE_MAP,
@@ -229,10 +230,10 @@ export class MariaDbElasticModel implements IPocModel {
         }));
     });
 
-    // ── Step 4: Compose ES request body ───────────────────────────────────
+    // ── Step 4: Compose BM25 request body ─────────────────────────────────
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const requestBody: Record<string, any> = {
-      size: 50,
+    const bm25Body: Record<string, any> = {
+      size: 100,
       query: {
         function_score: {
           query: {
@@ -247,39 +248,9 @@ export class MariaDbElasticModel implements IPocModel {
       },
     };
 
-    if (queryVector) {
-      requestBody['knn'] = {
-        field:          'embedding',
-        query_vector:   queryVector,
-        num_candidates: 100,
-        filter: {
-          bool: { must: mustClauses },
-        },
-      };
+    // ── Step 5: Execute search(es) ─────────────────────────────────────────
+    type RawHit = { _score: number | null; _source: Record<string, unknown> };
 
-      requestBody['rank'] = {
-        rrf: {
-          window_size:   50,
-          rank_constant: 60,
-        },
-      };
-    }
-
-    // ── Step 5: Execute search ─────────────────────────────────────────────
-    let hits: Array<{ _score: number | null; _source: Record<string, unknown> }>;
-    try {
-      const es = getElasticsearchClient();
-      const response = await es.search({ index: ES_INDEX, ...requestBody });
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      hits = response.hits.hits as any;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      throw new Error(`POC 4 search unavailable: ${msg}`);
-    }
-
-    if (hits.length === 0) return [];
-
-    // ── Step 6: Extract, tiebreak, filter, return top 5 ──────────────────
     type ScoredDoc = {
       mediaId: number;
       url: string;
@@ -287,29 +258,106 @@ export class MariaDbElasticModel implements IPocModel {
       rrfScore: number;
     };
 
-    const scored: ScoredDoc[] = hits.map((hit) => ({
-      mediaId:       Number(hit._source['media_id']),
-      url:           String(hit._source['url'] ?? ''),
-      visualQaScore: Number(hit._source['visual_qa_score'] ?? 0),
-      rrfScore:      hit._score ?? 0,
-    }));
+    const es = getElasticsearchClient();
 
-    // PRIMARY: RRF score descending (higher = better)
+    let scored: ScoredDoc[];
+
+    if (queryVector) {
+      // Run KNN and BM25 queries in parallel
+      const knnBody = {
+        size: 100,
+        knn: {
+          field:          'embedding',
+          query_vector:   queryVector,
+          num_candidates: 100,
+          filter: {
+            bool: { must: mustClauses },
+          },
+        },
+      };
+
+      let knnHits: RawHit[];
+      let bm25Hits: RawHit[];
+      try {
+        const [knnResp, bm25Resp] = await Promise.all([
+          es.search({ index: ES_INDEX, ...knnBody }),
+          es.search({ index: ES_INDEX, ...bm25Body }),
+        ]);
+        knnHits  = knnResp.hits.hits  as RawHit[];
+        bm25Hits = bm25Resp.hits.hits as RawHit[];
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`POC 4 search unavailable: ${msg}`);
+      }
+
+      // Build rank maps (1-based)
+      const knnRank  = new Map<number, number>();
+      const bm25Rank = new Map<number, number>();
+      knnHits.forEach((h, i)  => knnRank.set(Number(h._source['media_id']),  i + 1));
+      bm25Hits.forEach((h, i) => bm25Rank.set(Number(h._source['media_id']), i + 1));
+
+      // Collect all unique docs from both lists
+      const allDocs = new Map<number, { url: string; visualQaScore: number }>();
+      for (const h of [...knnHits, ...bm25Hits]) {
+        const id = Number(h._source['media_id']);
+        if (!allDocs.has(id)) {
+          allDocs.set(id, {
+            url:           String(h._source['url'] ?? ''),
+            visualQaScore: Number(h._source['visual_qa_score'] ?? 0),
+          });
+        }
+      }
+
+      // Apply manual RRF: score = 1/(k+rank_knn) + 1/(k+rank_bm25); k=60
+      const RRF_K = 60;
+      scored = Array.from(allDocs.entries()).map(([mediaId, doc]) => {
+        const rKnn  = knnRank.get(mediaId)  ?? Infinity;
+        const rBm25 = bm25Rank.get(mediaId) ?? Infinity;
+        const rrfScore =
+          (rKnn  < Infinity ? 1 / (RRF_K + rKnn)  : 0) +
+          (rBm25 < Infinity ? 1 / (RRF_K + rBm25) : 0);
+        return { mediaId, url: doc.url, visualQaScore: doc.visualQaScore, rrfScore };
+      });
+    } else {
+      let bm25Hits: RawHit[];
+      try {
+        const resp = await es.search({ index: ES_INDEX, ...bm25Body });
+        bm25Hits = resp.hits.hits as RawHit[];
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`POC 4 search unavailable: ${msg}`);
+      }
+
+      scored = bm25Hits.map((hit) => ({
+        mediaId:       Number(hit._source['media_id']),
+        url:           String(hit._source['url'] ?? ''),
+        visualQaScore: Number(hit._source['visual_qa_score'] ?? 0),
+        rrfScore:      hit._score ?? 0,
+      }));
+    }
+
+    if (scored.length === 0) return [];
+
+    // ── Step 6: Sort, filter, return top 50 ──────────────────────────────
+    // PRIMARY: RRF/BM25 score descending (higher = better)
     // TIEBREAK: visual_qa_score descending
     scored.sort((a, b) => {
       if (b.rrfScore !== a.rrfScore) return b.rrfScore - a.rrfScore;
       return b.visualQaScore - a.visualQaScore;
     });
 
-    return scored
+    const top = scored
       .filter((d) => d.visualQaScore >= minQaScore)
-      .slice(0, 5)
-      .map((d, idx) => ({
-        id:             d.mediaId,
-        url:            d.url,
-        visualQaScore:  d.visualQaScore,
-        tags:           [],
-        finalRank:      Math.round(d.rrfScore * 10000) / 10000,
-      }));
+      .slice(0, 50);
+
+    const tagsByMedia = await fetchAllTags(top.map((d) => d.mediaId));
+
+    return top.map((d) => ({
+      id:            d.mediaId,
+      url:           d.url,
+      visualQaScore: d.visualQaScore,
+      tags:          tagsByMedia.get(d.mediaId) ?? [],
+      finalRank:     Math.round(d.rrfScore * 10000) / 10000,
+    }));
   }
 }

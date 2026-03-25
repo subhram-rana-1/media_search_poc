@@ -8,6 +8,7 @@ import {
   Poc1MediaResult,
 } from '@/types';
 import { IPocModel } from './base';
+import { fetchAllTags } from './tag-helpers';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -449,16 +450,19 @@ export class MariaDbQdrantModel implements IPocModel {
       return qaB - qaA;
     });
 
-    // ── Step 5: Apply minQaScore filter, return top 5 ─────────────────────
-    return ranked
+    // ── Step 5: Apply minQaScore filter, return top 50 ────────────────────
+    const top = ranked
       .filter((h) => ((h.payload.visual_qa_score as number) ?? 0) >= minQaScore)
-      .slice(0, 5)
-      .map((h) => ({
-        id: h.id,
-        url: (h.payload.url as string) ?? '',
-        visualQaScore: (h.payload.visual_qa_score as number) ?? 0,
-        tags: [],
-        finalRank: Math.round(h.finalRank * 10) / 10,
-      }));
+      .slice(0, 50);
+
+    const tagsByMedia = await fetchAllTags(top.map((h) => h.id));
+
+    return top.map((h) => ({
+      id: h.id,
+      url: (h.payload.url as string) ?? '',
+      visualQaScore: (h.payload.visual_qa_score as number) ?? 0,
+      tags: tagsByMedia.get(h.id) ?? [],
+      finalRank: Math.round(h.finalRank * 10) / 10,
+    }));
   }
 }

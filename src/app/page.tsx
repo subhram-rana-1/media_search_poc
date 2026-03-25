@@ -642,6 +642,7 @@ export default function Home() {
   // ── Derived ──
   const isAnyLoading = POC_MODELS.some((m) => modelStatus[m.value] === 'loading');
   const allModelsSuccess = POC_MODELS.every((m) => modelStatus[m.value] === 'success');
+  const anyModelSuccess = POC_MODELS.some((m) => modelStatus[m.value] === 'success');
   const hasAnySearchStarted = POC_MODELS.some((m) => modelStatus[m.value] !== 'idle');
 
   const activeResult = modelResults[activeTab];
@@ -746,7 +747,7 @@ export default function Home() {
     const resultsPayload: Record<string, { durationMs: number; medias: Poc1MediaResult[] }> = {};
     for (const m of POC_MODELS) {
       const r = modelResults[m.value];
-      if (r) resultsPayload[m.value] = r;
+      resultsPayload[m.value] = r ?? { durationMs: 0, medias: [] };
     }
 
     const payload = {
@@ -1001,7 +1002,7 @@ export default function Home() {
             {/* Title row + download button */}
             <div className="px-6 pt-4 pb-2 flex items-center justify-between gap-3">
               <h2 className="text-base font-bold text-slate-800">Results</h2>
-              {allModelsSuccess && (
+              {anyModelSuccess && (
                 <button
                   type="button"
                   onClick={handleDownload}

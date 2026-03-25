@@ -9,13 +9,14 @@ import {
 } from '@/types';
 import { IPocModel } from './base';
 import { buildCombinedParagraph } from './mariadb-qdrant.model';
+import { fetchAllTags } from './tag-helpers';
 
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const POC3_COLLECTION = 'media_free_text_poc3';
-const TOP_N = 5;
+const TOP_N = 50;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -220,19 +221,22 @@ export class MariaDbQdrantHybridModel implements IPocModel {
       return vqaB - vqaA;
     });
 
-    return ranked
+    const top = ranked
       .filter((r) => Number(mediaMap.get(r.mediaId)?.visual_qa_score ?? 0) >= minQaScore)
-      .slice(0, TOP_N)
-      .map((r) => {
-        const media = mediaMap.get(r.mediaId);
-        return {
-          id: r.mediaId,
-          url: media?.url ?? '',
-          visualQaScore: Number(media?.visual_qa_score ?? 0),
-          tags: [],
-          finalRank: Math.round(r.finalRank * 1000) / 1000,
-        };
-      });
+      .slice(0, TOP_N);
+
+    const tagsByMedia = await fetchAllTags(top.map((r) => r.mediaId));
+
+    return top.map((r) => {
+      const media = mediaMap.get(r.mediaId);
+      return {
+        id: r.mediaId,
+        url: media?.url ?? '',
+        visualQaScore: Number(media?.visual_qa_score ?? 0),
+        tags: tagsByMedia.get(r.mediaId) ?? [],
+        finalRank: Math.round(r.finalRank * 1000) / 1000,
+      };
+    });
   }
 
   // ========================================================================
