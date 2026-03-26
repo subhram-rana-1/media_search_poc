@@ -7,6 +7,71 @@ import {
 } from '@/types';
 import { getModel } from '@/poc-models/registry';
 
+type ValidatedPayload = {
+  pocModel: PocModelType;
+  mediaTags: Poc1SearchTag[];
+  minQaScore: number;
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function validateSearchRequest(body: any): { error: NextResponse } | { payload: ValidatedPayload } {
+  const { pocModel } = body;
+
+  if (!pocModel || !Object.values(PocModelType).includes(pocModel)) {
+    return {
+      error: NextResponse.json(
+        { error: `Invalid or missing pocModel. Valid values: ${Object.values(PocModelType).join(', ')}` },
+        { status: 400 }
+      ),
+    };
+  }
+
+  const mediaTags: Poc1SearchTag[] | undefined = body.mediaTags;
+
+  if (!Array.isArray(mediaTags) || mediaTags.length === 0) {
+    return {
+      error: NextResponse.json(
+        { error: 'mediaTags must be a non-empty array' },
+        { status: 400 }
+      ),
+    };
+  }
+
+  for (const tag of mediaTags) {
+    if (tag.type === 'FREE_TEXT' && tag.isMandatory === true) {
+      return {
+        error: NextResponse.json(
+          { error: `Tag "${tag.name}": isMandatory=true is invalid for FREE_TEXT tags` },
+          { status: 400 }
+        ),
+      };
+    }
+    if (!tag.name || !tag.type || tag.values === undefined) {
+      return {
+        error: NextResponse.json(
+          { error: 'Each tag must have name, type, and values' },
+          { status: 400 }
+        ),
+      };
+    }
+    if (!['FIXED', 'FREE_TEXT'].includes(tag.type)) {
+      return {
+        error: NextResponse.json(
+          { error: `Invalid tag type: "${tag.type}". Must be FIXED or FREE_TEXT` },
+          { status: 400 }
+        ),
+      };
+    }
+  }
+
+  const minQaScore: number =
+    typeof body.minQaScore === 'number'
+      ? Math.min(1, Math.max(0, body.minQaScore))
+      : 0;
+
+  return { payload: { pocModel: pocModel as PocModelType, mediaTags, minQaScore } };
+}
+
 export async function POST(request: NextRequest) {
   const start = Date.now();
 
@@ -21,57 +86,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const { pocModel } = body;
+  const validation = validateSearchRequest(body);
+  if ('error' in validation) return validation.error;
 
-  if (!pocModel || !Object.values(PocModelType).includes(pocModel)) {
-    return NextResponse.json(
-      {
-        error: `Invalid or missing pocModel. Valid values: ${Object.values(PocModelType).join(', ')}`,
-      },
-      { status: 400 }
-    );
-  }
-
-  const mediaTags: Poc1SearchTag[] | undefined = body.mediaTags;
-
-  if (!Array.isArray(mediaTags) || mediaTags.length === 0) {
-    return NextResponse.json(
-      { error: 'mediaTags must be a non-empty array' },
-      { status: 400 }
-    );
-  }
-
-  // Validate tags
-  for (const tag of mediaTags) {
-    if (tag.type === 'FREE_TEXT' && tag.isMandatory === true) {
-      return NextResponse.json(
-        {
-          error: `Tag "${tag.name}": isMandatory=true is invalid for FREE_TEXT tags`,
-        },
-        { status: 400 }
-      );
-    }
-    if (!tag.name || !tag.type || tag.values === undefined) {
-      return NextResponse.json(
-        { error: 'Each tag must have name, type, and values' },
-        { status: 400 }
-      );
-    }
-    if (!['FIXED', 'FREE_TEXT'].includes(tag.type)) {
-      return NextResponse.json(
-        { error: `Invalid tag type: "${tag.type}". Must be FIXED or FREE_TEXT` },
-        { status: 400 }
-      );
-    }
-  }
-
-  const minQaScore: number =
-    typeof body.minQaScore === 'number'
-      ? Math.min(1, Math.max(0, body.minQaScore))
-      : 0;
+  const { pocModel, mediaTags, minQaScore } = validation.payload;
 
   try {
-    const model = getModel(pocModel as PocModelType);
+    const model = getModel(pocModel);
     const results = (await model.search(mediaTags, minQaScore)) as Poc1MediaResult[];
 
     const response: Poc1SearchResponse & { pocModel: string; durationMs: number } = {
