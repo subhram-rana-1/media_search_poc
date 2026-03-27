@@ -370,81 +370,123 @@ export class MariaDbQdrantModel implements IPocModel {
     const qdrantFilter: any | undefined =
       mustConditions.length > 0 ? { must: mustConditions } : undefined;
 
-    // ── Step 2 (cont): Run Qdrant search or scroll ─────────────────────────
+    // ── Step 2a: Always scroll all M-filtered candidates (NM candidate pool) ─
+    // Fetching up to 1000 ensures all NM-matching documents are captured before
+    // in-app NM scoring, regardless of whether free-text tags are also present.
+    // Using a single large scroll (rather than limit 50) mirrors the Elastic
+    // model's size:1000 M-filter query.
     type QdrantHit = {
       id: number;
-      score: number;
+      score: number;  // cosine similarity from KNN; 0 for scroll-only hits
       payload: Record<string, unknown>;
     };
 
-    let hits: QdrantHit[];
-
-    if (queryVector) {
-      const results = await getQdrantClient().search(QDRANT_COLLECTION, {
-        vector: queryVector,
-        filter: qdrantFilter,
-        limit: 50,
-        with_payload: true,
-        with_vector: false,
-      });
-      hits = results.map((r) => ({
-        id: r.id as number,
-        score: r.score,
-        payload: (r.payload ?? {}) as Record<string, unknown>,
-      }));
-    } else {
-      // No free-text: scroll all matching points (up to 50)
-      const { points } = await getQdrantClient().scroll(QDRANT_COLLECTION, {
-        filter: qdrantFilter,
-        limit: 50,
-        with_payload: true,
-        with_vector: false,
-      });
-      hits = points.map((r) => ({
-        id: r.id as number,
-        score: 0,
-        payload: (r.payload ?? {}) as Record<string, unknown>,
-      }));
-    }
-
-    if (hits.length === 0) return [];
-
-    // ── Step 3: Compute NM score from payload ─────────────────────────────
-    const totalNm = nmTags.length;
-
-    type ScoredHit = QdrantHit & { nmScore: number };
-    const scored: ScoredHit[] = hits.map((hit) => {
-      let nmMatch = 0;
-      for (const tag of nmTags) {
-        const fieldName = FIXED_TAG_FIELD[tag.name];
-        const valueMap  = FIXED_TAG_VALUE_MAP[tag.name];
-        if (!fieldName || !valueMap) continue;
-
-        const storedInt = hit.payload[fieldName] as number | undefined;
-        const matchInts = tag.values
-          .split(',')
-          .map((v) => valueMap[v.trim()] ?? -1);
-        if (storedInt !== undefined && matchInts.includes(storedInt)) nmMatch++;
-      }
-      const nmScore = totalNm > 0 ? nmMatch / totalNm : 0;
-      return { ...hit, nmScore };
+    const { points } = await getQdrantClient().scroll(QDRANT_COLLECTION, {
+      filter: qdrantFilter,
+      limit: 1000,
+      with_payload: true,
+      with_vector: false,
     });
 
-    // ── Step 4: Assign ranks and compute final rank ────────────────────────
-    const byVector = [...scored].sort((a, b) => b.score - a.score);
-    const rank1Map = new Map(byVector.map((h, i) => [h.id, i + 1]));
+    // Seed the merged doc map from the scroll results (knnScore starts at 0).
+    const allDocs = new Map<number, QdrantHit>();
+    for (const p of points) {
+      const id = p.id as number;
+      allDocs.set(id, {
+        id,
+        score:   0,
+        payload: (p.payload ?? {}) as Record<string, unknown>,
+      });
+    }
 
-    const byNm = [...scored].sort((a, b) => b.nmScore - a.nmScore);
-    const rank2Map = new Map(byNm.map((h, i) => [h.id, i + 1]));
+    // ── Step 2b: If free-text tags present, run KNN and merge scores ──────────
+    // KNN results are merged into allDocs so each document carries both an NM
+    // score (from payload inspection) and a vector score (from cosine KNN).
+    // Documents in KNN results but not in the scroll (edge case with M-filters)
+    // are also added to ensure completeness.
+    if (queryVector) {
+      const knnResults = await getQdrantClient().search(QDRANT_COLLECTION, {
+        vector:       queryVector,
+        filter:       qdrantFilter,
+        limit:        200,
+        with_payload: true,
+        with_vector:  false,
+      });
+      for (const r of knnResults) {
+        const id       = r.id as number;
+        const existing = allDocs.get(id);
+        if (existing) {
+          existing.score = r.score;
+        } else {
+          allDocs.set(id, {
+            id,
+            score:   r.score,
+            payload: (r.payload ?? {}) as Record<string, unknown>,
+          });
+        }
+      }
+    }
 
-    type RankedHit = ScoredHit & { finalRank: number };
-    const ranked: RankedHit[] = scored.map((h) => ({
-      ...h,
-      finalRank: 0.5 * (rank1Map.get(h.id) ?? 1) + 0.5 * (rank2Map.get(h.id) ?? 1),
+    if (allDocs.size === 0) return [];
+    const hits = Array.from(allDocs.values());
+
+    // ── Step 3: Compute NM score from payload ─────────────────────────────
+    // Build a flat list of { fieldName, intValue } pairs — one per NM tag value
+    // term — so multi-value tags are counted individually. This matches the
+    // approach in the Elastic model and ensures totalNmValues reflects the true
+    // maximum possible match count.
+    const nmTagMatches: { fieldName: string; intValue: number }[] =
+      nmTags.flatMap((tag) => {
+        const fieldName = FIXED_TAG_FIELD[tag.name];
+        const valueMap  = FIXED_TAG_VALUE_MAP[tag.name];
+        if (!fieldName || !valueMap) return [];
+        return tag.values
+          .split(',')
+          .map((v) => v.trim())
+          .filter(Boolean)
+          .flatMap((v) => {
+            const intValue = valueMap[v];
+            return intValue !== undefined ? [{ fieldName, intValue }] : [];
+          });
+      });
+    const totalNmValues = nmTagMatches.length;
+
+    type ScoredHit = QdrantHit & { nmScore: number };
+    const scored: ScoredHit[] = hits.map((hit) => ({
+      ...hit,
+      nmScore: nmTagMatches.filter(({ fieldName, intValue }) =>
+        Number(hit.payload[fieldName]) === intValue
+      ).length,
     }));
 
+    // ── Step 4: Normalize scores and compute finalScore ────────────────────
+    // nmScoreNorm  ∈ [0, 1]: nmScore / totalNmValues
+    // vectorScoreNorm ∈ [0, 1]: Qdrant cosine similarity is already in this range
+    //
+    // finalScore weights:
+    //   NM + FT  →  0.5 × nmScoreNorm + 0.5 × vectorScoreNorm
+    //   NM only  →  nmScoreNorm
+    //   FT only  →  vectorScoreNorm
+    //   neither  →  0  (fall through to visualQaScore tiebreak)
+    const hasNm = totalNmValues > 0;
+    const hasFt = queryVector !== null;
+
+    type RankedHit = ScoredHit & { finalScore: number };
+    const ranked: RankedHit[] = scored.map((h) => {
+      const nmScoreNorm     = hasNm ? h.nmScore / totalNmValues : 0;
+      const vectorScoreNorm = h.score; // cosine similarity already in [0, 1]
+
+      let finalScore: number;
+      if (hasNm && hasFt)  finalScore = 0.5 * nmScoreNorm + 0.5 * vectorScoreNorm;
+      else if (hasNm)      finalScore = nmScoreNorm;
+      else if (hasFt)      finalScore = vectorScoreNorm;
+      else                 finalScore = 0;
+
+      return { ...h, finalScore };
+    });
+
     ranked.sort((a, b) => {
-      if (a.finalRank !== b.finalRank) return a.finalRank - b.finalRank;
+      if (b.finalScore !== a.finalScore) return b.finalScore - a.finalScore;
       const qaA = (a.payload.visual_qa_score as number) ?? 0;
       const qaB = (b.payload.visual_qa_score as number) ?? 0;
       return qaB - qaA;
@@ -462,7 +504,7 @@ export class MariaDbQdrantModel implements IPocModel {
       url: (h.payload.url as string) ?? '',
       visualQaScore: (h.payload.visual_qa_score as number) ?? 0,
       tags: tagsByMedia.get(h.id) ?? [],
-      finalRank: Math.round(h.finalRank * 10) / 10,
+      finalRank: Math.round(h.finalScore * 10000) / 10000,
     }));
   }
 }
